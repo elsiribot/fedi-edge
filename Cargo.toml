@@ -173,9 +173,9 @@ fedimint-portalloc = { git = "https://github.com/fedibtc/fedimint", tag = "v0.11
 fedimint-cursed-redb = { git = "https://github.com/fedibtc/fedimint", tag = "v0.11.0-fedi7" }
 # usdt module crates only exist on the backport branch (elsiribot/fedimint
 # v0.11.0-fedi7-usdt), consumed via the [patch] section below during dev
-fedimint-usdt-client = { path = "../fedimint-backport/modules/fedimint-usdt-client" }
-fedimint-usdt-common = { path = "../fedimint-backport/modules/fedimint-usdt-common" }
-fedimint-usdt-server = { path = "../fedimint-backport/modules/fedimint-usdt-server" }
+fedimint-usdt-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-usdt-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-usdt-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
 devimint = { git = "https://github.com/fedibtc/fedimint", tag = "v0.11.0-fedi7" }
 ln-gateway = { git = "https://github.com/fedibtc/fedimint", tag = "v0.11.0-fedi7" }
 
@@ -260,60 +260,60 @@ iroh-relay = { git = "https://github.com/fedibtc/iroh", branch = "ma/0.35.0-no-h
 # During development this points at the sibling backport worktree; the
 # workspace deps above stay on the fedibtc git tag so nothing else changes.
 [patch."https://github.com/fedibtc/fedimint"]
-devimint = { path = "../fedimint-backport/devimint" }
-fedimint-aead = { path = "../fedimint-backport/crypto/aead" }
-fedimint-api-client = { path = "../fedimint-backport/fedimint-api-client" }
-fedimint-bip39 = { path = "../fedimint-backport/fedimint-bip39" }
-fedimint-bitcoind = { path = "../fedimint-backport/fedimint-bitcoind" }
-fedimint-build = { path = "../fedimint-backport/fedimint-build" }
-fedimint-cli = { path = "../fedimint-backport/fedimint-cli" }
-fedimint-client = { path = "../fedimint-backport/fedimint-client" }
-fedimint-client-module = { path = "../fedimint-backport/fedimint-client-module" }
-fedimint-connectors = { path = "../fedimint-backport/fedimint-connectors" }
-fedimint-core = { path = "../fedimint-backport/fedimint-core" }
-fedimint-cursed-redb = { path = "../fedimint-backport/fedimint-cursed-redb" }
-fedimintd = { path = "../fedimint-backport/fedimintd" }
-fedimint-db-locked = { path = "../fedimint-backport/fedimint-db-locked" }
-fedimintd-envs = { path = "../fedimint-backport/fedimintd-envs" }
-fedimint-derive = { path = "../fedimint-backport/fedimint-derive" }
-fedimint-derive-secret = { path = "../fedimint-backport/crypto/derive-secret" }
-fedimint-eventlog = { path = "../fedimint-backport/fedimint-eventlog" }
-fedimint-gateway-common = { path = "../fedimint-backport/gateway/fedimint-gateway-common" }
-fedimint-hkdf = { path = "../fedimint-backport/crypto/hkdf" }
-fedimint-ln-client = { path = "../fedimint-backport/modules/fedimint-ln-client" }
-fedimint-ln-common = { path = "../fedimint-backport/modules/fedimint-ln-common" }
-fedimint-ln-server = { path = "../fedimint-backport/modules/fedimint-ln-server" }
-fedimint-lnurl = { path = "../fedimint-backport/fedimint-lnurl" }
-fedimint-lnv2-client = { path = "../fedimint-backport/modules/fedimint-lnv2-client" }
-fedimint-lnv2-common = { path = "../fedimint-backport/modules/fedimint-lnv2-common" }
-fedimint-lnv2-server = { path = "../fedimint-backport/modules/fedimint-lnv2-server" }
-fedimint-logging = { path = "../fedimint-backport/fedimint-logging" }
-fedimint-meta-client = { path = "../fedimint-backport/modules/fedimint-meta-client" }
-fedimint-meta-common = { path = "../fedimint-backport/modules/fedimint-meta-common" }
-fedimint-meta-server = { path = "../fedimint-backport/modules/fedimint-meta-server" }
-fedimint-metrics = { path = "../fedimint-backport/fedimint-metrics" }
-fedimint-mint-client = { path = "../fedimint-backport/modules/fedimint-mint-client" }
-fedimint-mint-common = { path = "../fedimint-backport/modules/fedimint-mint-common" }
-fedimint-mint-server = { path = "../fedimint-backport/modules/fedimint-mint-server" }
-fedimint-mintv2-client = { path = "../fedimint-backport/modules/fedimint-mintv2-client" }
-fedimint-mintv2-common = { path = "../fedimint-backport/modules/fedimint-mintv2-common" }
-fedimint-mintv2-server = { path = "../fedimint-backport/modules/fedimint-mintv2-server" }
-fedimint-portalloc = { path = "../fedimint-backport/utils/portalloc" }
-fedimint-rocksdb = { path = "../fedimint-backport/fedimint-rocksdb" }
-fedimint-server = { path = "../fedimint-backport/fedimint-server" }
-fedimint-server-bitcoin-rpc = { path = "../fedimint-backport/fedimint-server-bitcoin-rpc" }
-fedimint-server-core = { path = "../fedimint-backport/fedimint-server-core" }
-fedimint-server-ui = { path = "../fedimint-backport/fedimint-server-ui" }
-fedimint-tbs = { path = "../fedimint-backport/crypto/tbs" }
-fedimint-testing-core = { path = "../fedimint-backport/fedimint-testing-core" }
-fedimint-tpe = { path = "../fedimint-backport/crypto/tpe" }
-fedimint-ui-common = { path = "../fedimint-backport/fedimint-ui-common" }
-fedimint-unknown-common = { path = "../fedimint-backport/modules/fedimint-unknown-common" }
-fedimint-unknown-server = { path = "../fedimint-backport/modules/fedimint-unknown-server" }
-fedimint-util-error = { path = "../fedimint-backport/fedimint-util-error" }
-fedimint-wallet-client = { path = "../fedimint-backport/modules/fedimint-wallet-client" }
-fedimint-wallet-common = { path = "../fedimint-backport/modules/fedimint-wallet-common" }
-fedimint-wallet-server = { path = "../fedimint-backport/modules/fedimint-wallet-server" }
-fedimint-walletv2-client = { path = "../fedimint-backport/modules/fedimint-walletv2-client" }
-fedimint-walletv2-common = { path = "../fedimint-backport/modules/fedimint-walletv2-common" }
-fedimint-walletv2-server = { path = "../fedimint-backport/modules/fedimint-walletv2-server" }
+devimint = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-aead = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-api-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-bip39 = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-bitcoind = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-build = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-cli = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-client-module = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-connectors = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-core = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-cursed-redb = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimintd = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-db-locked = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimintd-envs = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-derive = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-derive-secret = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-eventlog = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-gateway-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-hkdf = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-ln-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-ln-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-ln-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-lnurl = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-lnv2-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-lnv2-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-lnv2-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-logging = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-meta-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-meta-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-meta-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-metrics = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-mint-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-mint-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-mint-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-mintv2-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-mintv2-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-mintv2-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-portalloc = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-rocksdb = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-server-bitcoin-rpc = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-server-core = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-server-ui = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-tbs = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-testing-core = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-tpe = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-ui-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-unknown-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-unknown-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-util-error = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-wallet-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-wallet-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-wallet-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-walletv2-client = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-walletv2-common = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
+fedimint-walletv2-server = { git = "https://github.com/elsiribot/fedimint", branch = "v0.11.0-fedi7-usdt" }
