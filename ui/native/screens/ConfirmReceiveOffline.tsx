@@ -114,14 +114,25 @@ const ConfirmReceiveOffline: React.FC<Props> = ({
     useEffect(() => {
         dispatch(parseEcash({ fedimint, ecash }))
             .unwrap()
-            .then(setParsedEcash)
+            .then(parsed => {
+                // This screen's amounts and fees are Bitcoin-denominated;
+                // USDT notes are handled by the unit-aware claim flow.
+                if (
+                    parsed.federation_type === 'joined' &&
+                    parsed.unit === 'usdt'
+                ) {
+                    navigation.replace('ClaimEcash', { id: ecash })
+                    return
+                }
+                setParsedEcash(parsed)
+            })
             .catch(() => {
                 // Should never happen since parseEcash is called in OmniInput,
                 // which is the only way to get here
                 log.error('PANIC: ecash validation failed')
                 toast.error(t, 'errors.invalid-ecash-token')
             })
-    }, [ecash, dispatch, toast, t, fedimint])
+    }, [ecash, dispatch, toast, t, fedimint, navigation])
 
     if (parsedEcash && parsedEcash.federation_type !== 'joined') {
         // Should never happen since you are required to go through the join flow
