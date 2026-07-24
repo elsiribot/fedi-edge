@@ -21,6 +21,7 @@ import { EdgeInsets, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
 
 import StabilityPoolMonitorManager from '@fedi/common/components/StabilityPoolMonitorManager'
+import UsdtMonitorManager from '@fedi/common/components/UsdtMonitorManager'
 import { theme as fediTheme } from '@fedi/common/constants/theme'
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import {
@@ -391,6 +392,7 @@ const TabsNavigator: React.FC<Props> = ({ route }: Props) => {
                 onOpenChange={setCommunitiesOverlayOpen}
             />
             <StabilityPoolMonitorManager />
+            <UsdtMonitorManager />
             <PersonalBackupReminderOverlay
                 open={shouldShowBackupReminder}
                 onDismiss={() => setShouldShowBackupReminder(false)}

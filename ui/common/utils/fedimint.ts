@@ -24,6 +24,7 @@ import {
     RpcStabilityPoolAccountInfo,
     RpcTimelineEventItemId,
     RpcTransaction,
+    RpcUsdtAmount,
 } from '../types/bindings'
 import { BridgeError } from '../utils/errors'
 import { MatrixChatClient } from './MatrixChatClient'
@@ -325,6 +326,62 @@ export class FedimintBridge {
 
     async spv2AvailableLiquidity(federationId: string) {
         return this.rpcTyped('spv2AvailableLiquidity', { federationId })
+    }
+
+    /*** USDT RPC METHODS ***/
+
+    async usdtSupported(federationId: string) {
+        return this.rpcTyped('usdtSupported', { federationId })
+    }
+
+    async usdtStatus(federationId: string) {
+        return this.rpcTyped('usdtStatus', { federationId })
+    }
+
+    async usdtBalance(federationId: string) {
+        return this.rpcTyped('usdtBalance', { federationId })
+    }
+
+    async usdtGenerateDepositAddress(federationId: string) {
+        return this.rpcTyped('usdtGenerateDepositAddress', { federationId })
+    }
+
+    async usdtDepositStatus(federationId: string, address: string) {
+        return this.rpcTyped('usdtDepositStatus', { federationId, address })
+    }
+
+    async usdtListDeposits(federationId: string) {
+        return this.rpcTyped('usdtListDeposits', { federationId })
+    }
+
+    async usdtCheckDeposits(federationId: string) {
+        return this.rpcTyped('usdtCheckDeposits', { federationId })
+    }
+
+    async usdtRecoverDeposits(federationId: string) {
+        return this.rpcTyped('usdtRecoverDeposits', { federationId })
+    }
+
+    async usdtWithdrawFeeQuote(federationId: string, amount: RpcUsdtAmount) {
+        return this.rpcTyped('usdtWithdrawFeeQuote', { federationId, amount })
+    }
+
+    async usdtWithdraw(
+        federationId: string,
+        recipient: string,
+        amount: RpcUsdtAmount,
+        maxFee: RpcUsdtAmount,
+    ) {
+        return this.rpcTyped('usdtWithdraw', {
+            federationId,
+            recipient,
+            amount,
+            maxFee,
+        })
+    }
+
+    async usdtWithdrawalStatus(federationId: string, txid: string) {
+        return this.rpcTyped('usdtWithdrawalStatus', { federationId, txid })
     }
 
     async listTransactions(

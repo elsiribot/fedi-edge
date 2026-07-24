@@ -271,6 +271,13 @@ export type RootStackParamList = {
         | { initialRouteName: keyof TabsNavigatorParamList }
         | undefined
     Transactions: { federationId: Federation['id'] }
+    UsdtReceive: undefined
+    UsdtSend: undefined
+    UsdtWithdrawInitiated: {
+        txid: string
+        amountMicros: number
+        recipient: string
+    }
     UploadAvatarImage: undefined
     DeveloperSettings: undefined
     SetPin: undefined

@@ -107,6 +107,50 @@ export function useIsStabilityPoolSupported(federationId: Federation['id']) {
     return false
 }
 
+export function useIsUsdtSupported(federationId: Federation['id']) {
+    const federationConfig = useCommonSelector(s =>
+        selectFederationClientConfig(s, federationId),
+    )
+    if (!federationConfig) return false
+
+    const { modules } = federationConfig
+    for (const key in modules) {
+        // TODO: add better typing for this
+        const fmModule = modules[key] as Partial<{ kind: string }>
+        if (fmModule.kind === 'usdt') {
+            return true
+        }
+    }
+    return false
+}
+
+/**
+ * A federation is USDT-only if it has a USDT module but no bitcoin
+ * wallet or lightning modules.
+ */
+export function useIsUsdtOnlyFederation(federationId: Federation['id']) {
+    const isUsdtSupported = useIsUsdtSupported(federationId)
+    const federationConfig = useCommonSelector(s =>
+        selectFederationClientConfig(s, federationId),
+    )
+    if (!isUsdtSupported || !federationConfig) return false
+
+    const { modules } = federationConfig
+    for (const key in modules) {
+        // TODO: add better typing for this
+        const fmModule = modules[key] as Partial<{ kind: string }>
+        if (
+            fmModule.kind === 'wallet' ||
+            fmModule.kind === 'walletv2' ||
+            fmModule.kind === 'ln' ||
+            fmModule.kind === 'lnv2'
+        ) {
+            return false
+        }
+    }
+    return true
+}
+
 export function useIsStabilityPoolEnabledByFederation(
     federationId: Federation['id'],
 ) {

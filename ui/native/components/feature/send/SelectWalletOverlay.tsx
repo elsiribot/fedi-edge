@@ -4,14 +4,20 @@ import { useTranslation } from 'react-i18next'
 import { ScrollView, StyleSheet } from 'react-native'
 
 import { useBalance } from '@fedi/common/hooks/amount'
-import { useIsStabilityPoolEnabledByFederation } from '@fedi/common/hooks/federation'
+import {
+    useIsStabilityPoolEnabledByFederation,
+    useIsUsdtOnlyFederation,
+    useIsUsdtSupported,
+} from '@fedi/common/hooks/federation'
 import { useRecoveryProgress } from '@fedi/common/hooks/recovery'
+import { useUsdtBalance } from '@fedi/common/hooks/usdt'
 import {
     selectCurrency,
     selectLoadedFederationsByRecency,
     selectShouldShowInviteCode,
     setPaymentType,
     setSelectedFederationId,
+    type PaymentType,
 } from '@fedi/common/redux'
 import { getCurrencyCode } from '@fedi/common/utils/currency'
 
@@ -33,7 +39,7 @@ export default function SelectWalletOverlay({
     onDismiss,
 }: {
     open: boolean
-    onDismiss: (paymentType?: 'bitcoin' | 'stable-balance') => void
+    onDismiss: (paymentType?: PaymentType) => void
 }) {
     const { t } = useTranslation()
     const { theme } = useTheme()
@@ -86,6 +92,8 @@ function WalletListItem({
     const supportsStabilityPool = useIsStabilityPoolEnabledByFederation(
         federation.id,
     )
+    const supportsUsdt = useIsUsdtSupported(federation.id)
+    const isUsdtOnly = useIsUsdtOnlyFederation(federation.id)
     const { recoveryInProgress } = useRecoveryProgress(federation.id)
     const shouldShowInvite = useAppSelector(s =>
         selectShouldShowInviteCode(s, federation.id),
@@ -110,10 +118,16 @@ function WalletListItem({
         onDismiss()
     }
 
+    const handleSelectUsdt = () => {
+        dispatch(setSelectedFederationId(federation.id))
+        dispatch(setPaymentType('usdt'))
+        onDismiss()
+    }
+
     return (
         <Column gap="sm" testID={`SelectWalletListItem-${federation.id}`}>
             <Pressable
-                onPress={handleSelectBitcoin}
+                onPress={isUsdtOnly ? handleSelectUsdt : handleSelectBitcoin}
                 containerStyle={style.walletHeader}>
                 <FederationStatusAvatar federation={federation} size={40} />
                 <Column style={style.label}>
@@ -132,16 +146,25 @@ function WalletListItem({
             </Pressable>
             {!recoveryInProgress && (
                 <>
-                    <BalanceItem
-                        type="bitcoin"
-                        federation={federation}
-                        onPress={handleSelectBitcoin}
-                    />
-                    {supportsStabilityPool && (
+                    {!isUsdtOnly && (
+                        <BalanceItem
+                            type="bitcoin"
+                            federation={federation}
+                            onPress={handleSelectBitcoin}
+                        />
+                    )}
+                    {!isUsdtOnly && supportsStabilityPool && (
                         <BalanceItem
                             type="stable-balance"
                             federation={federation}
                             onPress={handleSelectStableBalance}
+                        />
+                    )}
+                    {supportsUsdt && (
+                        <BalanceItem
+                            type="usdt"
+                            federation={federation}
+                            onPress={handleSelectUsdt}
                         />
                     )}
                 </>
@@ -155,7 +178,7 @@ function BalanceItem({
     federation,
     onPress,
 }: {
-    type: 'bitcoin' | 'stable-balance'
+    type: PaymentType
     federation: LoadedFederation
     onPress: () => void
 }) {
@@ -166,6 +189,9 @@ function BalanceItem({
         selectCurrency(s, federation.id),
     )
     const { formattedStableBalance } = useStabilityPool(federation.id)
+    const { formattedBalance: formattedUsdtBalance } = useUsdtBalance(
+        federation.id,
+    )
     const { formattedBalanceFiat, formattedBalanceSats } = useBalance(
         t,
         federation.id,
@@ -173,6 +199,31 @@ function BalanceItem({
 
     const currencyCode = getCurrencyCode(selectedCurrency)
     const style = styles(theme)
+
+    if (type === 'usdt') {
+        return (
+            <Pressable
+                containerStyle={style.balanceItem}
+                onPress={onPress}
+                testID={`UsdtBalanceButton-${federation.id}`}>
+                <SvgImage
+                    name="UsdCircleFilled"
+                    color={theme.colors.moneyGreen}
+                />
+                <Text style={style.label} numberOfLines={1}>
+                    {t('feature.usdt.usdt-balance')}
+                </Text>
+                <Text style={style.balanceText} numberOfLines={1}>
+                    {formattedUsdtBalance}
+                </Text>
+                <SvgImage
+                    name="ChevronRight"
+                    color={theme.colors.darkGrey}
+                    size={16}
+                />
+            </Pressable>
+        )
+    }
 
     if (type === 'stable-balance') {
         return (

@@ -1537,6 +1537,26 @@
             "title": "Ask Fedi",
             "zendesk-initialization-failed": "We couldn't reach the support chat. Please check your internet connection and try again."
         },
+        "usdt": {
+            "usdt-balance": "USDT",
+            "receive-usdt": "Receive USDT",
+            "send-usdt": "Send USDT",
+            "awaiting-deposit": "Awaiting deposit…",
+            "deposit-received": "Deposit received",
+            "recipient-address": "Recipient address (0x…)",
+            "invalid-address": "Invalid address",
+            "invalid-amount": "Invalid amount",
+            "insufficient-balance": "Insufficient balance",
+            "network-fee": "Network fee",
+            "recipient-receives": "Recipient receives",
+            "sent-to": "Sent to {{address}}",
+            "withdrawal-initiated": "Withdrawal initiated",
+            "withdrawal-queued": "Waiting to be processed…",
+            "withdrawal-signing": "Guardians are signing the transaction…",
+            "withdrawal-submitted": "Submitted to the network…",
+            "withdrawal-confirmed": "Withdrawal confirmed",
+            "withdrawal-failed": "Withdrawal failed: {{reason}}"
+        },
         "updates": {
             "new-app-version": "New App Version",
             "new-release-available": "New Fedi App release is available!",

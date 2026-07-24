@@ -1,11 +1,15 @@
 import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs'
 import { useNavigation } from '@react-navigation/native'
 import { Button, Text, useTheme, type Theme } from '@rneui/themed'
-import React, { useEffect } from 'react'
+import React, { useEffect, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ScrollView, StyleSheet } from 'react-native'
 
-import { useIsStabilityPoolEnabledByFederation } from '@fedi/common/hooks/federation'
+import {
+    useIsStabilityPoolEnabledByFederation,
+    useIsUsdtOnlyFederation,
+    useIsUsdtSupported,
+} from '@fedi/common/hooks/federation'
 import { useWalletButtons } from '@fedi/common/hooks/wallet'
 import {
     selectCurrency,
@@ -17,6 +21,7 @@ import {
     selectSelectedFederation,
     setPaymentType,
     setPayFromFederationId,
+    type PaymentType,
 } from '@fedi/common/redux'
 import { getCurrencyCode } from '@fedi/common/utils/currency'
 
@@ -27,7 +32,7 @@ import { Column, Row } from '../components/ui/Flex'
 import HelpTooltip from '../components/ui/HelpTooltip'
 import { Pressable } from '../components/ui/Pressable'
 import SvgImage from '../components/ui/SvgImage'
-import { Switcher } from '../components/ui/Switcher'
+import { Switcher, type Option } from '../components/ui/Switcher'
 import { useAppDispatch, useAppSelector } from '../state/hooks'
 import { LoadedFederation } from '../types'
 import type {
@@ -58,6 +63,8 @@ const Wallet: React.FC<Props> = ({ navigation }) => {
 
     const stabilityPoolDisabledByFederation =
         !useIsStabilityPoolEnabledByFederation(federationId)
+    const isUsdtSupported = useIsUsdtSupported(federationId)
+    const isUsdtOnlyFederation = useIsUsdtOnlyFederation(federationId)
 
     const { sendDisabled, receiveDisabled, disabledMessage } = useWalletButtons(
         t,
@@ -70,6 +77,8 @@ const Wallet: React.FC<Props> = ({ navigation }) => {
         dispatch(setPayFromFederationId(federationId))
         if (paymentType === 'stable-balance') {
             navigation.navigate('StabilityReceive', { federationId })
+        } else if (paymentType === 'usdt') {
+            navigation.navigate('UsdtReceive')
         } else {
             navigation.navigate('ReceiveBitcoin', {})
         }
@@ -79,6 +88,8 @@ const Wallet: React.FC<Props> = ({ navigation }) => {
         dispatch(setPayFromFederationId(federationId))
         if (paymentType === 'stable-balance') {
             navigation.navigate('StabilitySend', { federationId })
+        } else if (paymentType === 'usdt') {
+            navigation.navigate('UsdtSend')
         } else if (isOffline) {
             navigation.navigate('SendOfflineAmount')
         } else {
@@ -89,17 +100,61 @@ const Wallet: React.FC<Props> = ({ navigation }) => {
     const currencyCode = getCurrencyCode(selectedCurrency)
     const style = styles(theme)
 
+    const switcherOptions = useMemo(() => {
+        const options: Option<PaymentType>[] = []
+        if (!isUsdtOnlyFederation) {
+            options.push({
+                label: t('words.bitcoin'),
+                value: 'bitcoin',
+            })
+            if (!stabilityPoolDisabledByFederation) {
+                options.push({
+                    label: currencyCode,
+                    value: 'stable-balance',
+                })
+            }
+        }
+        if (isUsdtSupported) {
+            options.push({
+                label: t('feature.usdt.usdt-balance'),
+                value: 'usdt',
+            })
+        }
+        return options
+    }, [
+        t,
+        currencyCode,
+        isUsdtOnlyFederation,
+        isUsdtSupported,
+        stabilityPoolDisabledByFederation,
+    ])
+
     useEffect(() => {
         if (loadedFederationsByRecency.length > 0 && !federation)
             dispatch(setSelectedFederationId(loadedFederationsByRecency[0].id))
     }, [federation, loadedFederationsByRecency, dispatch])
 
-    // If the current federation doesn't support stability pool, switch to bitcoin
+    // If the current federation is USDT-only, force the USDT account.
+    // Otherwise if the current payment type isn't supported by the
+    // federation, switch back to bitcoin.
     useEffect(() => {
-        if (stabilityPoolDisabledByFederation) {
+        if (isUsdtOnlyFederation) {
+            if (paymentType !== 'usdt') dispatch(setPaymentType('usdt'))
+        } else if (paymentType === 'usdt' && !isUsdtSupported) {
+            dispatch(setPaymentType('bitcoin'))
+        } else if (
+            paymentType === 'stable-balance' &&
+            stabilityPoolDisabledByFederation
+        ) {
             dispatch(setPaymentType('bitcoin'))
         }
-    }, [dispatch, stabilityPoolDisabledByFederation])
+    }, [
+        dispatch,
+        paymentType,
+        isUsdtOnlyFederation,
+        isUsdtSupported,
+        stabilityPoolDisabledByFederation,
+    ])
 
     if (loadedFederations.length === 0) {
         return <WalletSetupEmpty navigation={navigation} />
@@ -114,18 +169,9 @@ const Wallet: React.FC<Props> = ({ navigation }) => {
             alwaysBounceVertical={false}>
             <Column gap="lg" fullWidth grow>
                 <SelectedWalletHeader federation={federation} />
-                {stabilityPoolDisabledByFederation ? null : (
-                    <Switcher<'bitcoin' | 'stable-balance'>
-                        options={[
-                            {
-                                label: t('words.bitcoin'),
-                                value: 'bitcoin',
-                            },
-                            {
-                                label: currencyCode,
-                                value: 'stable-balance',
-                            },
-                        ]}
+                {switcherOptions.length > 1 && (
+                    <Switcher<PaymentType>
+                        options={switcherOptions}
                         onChange={type => dispatch(setPaymentType(type))}
                         selected={paymentType}
                     />

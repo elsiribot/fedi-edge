@@ -36,6 +36,8 @@ import { loadFromStorage } from './storage'
 
 const log = makeLog('redux/environment')
 
+export type PaymentType = 'bitcoin' | 'stable-balance' | 'usdt'
+
 /*** Initial State ***/
 
 const initialState = {
@@ -64,7 +66,7 @@ const initialState = {
     redirectTo: null as string | null,
     eventListenersReady: false,
     lastUsedTab: HomeNavigationTab.Wallet,
-    paymentType: 'bitcoin' as 'bitcoin' | 'stable-balance',
+    paymentType: 'bitcoin' as PaymentType,
     latestAwareReleaseTag: null as string | null,
     versionTag: null as string | null,
     shouldRequestAppUpdate: false,
@@ -166,10 +168,7 @@ export const environmentSlice = createSlice({
         setLastUsedTab(state, action: PayloadAction<HomeNavigationTab>) {
             state.lastUsedTab = action.payload
         },
-        setPaymentType(
-            state,
-            action: PayloadAction<'bitcoin' | 'stable-balance'>,
-        ) {
+        setPaymentType(state, action: PayloadAction<PaymentType>) {
             state.paymentType = action.payload
         },
         setLatestAwareReleaseTag(state, action: PayloadAction<string | null>) {

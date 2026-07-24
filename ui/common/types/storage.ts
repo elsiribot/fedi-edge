@@ -380,7 +380,7 @@ export interface StoredStateV43 extends Omit<StoredStateV42, 'version'> {
 
 export interface StoredStateV44 extends Omit<StoredStateV43, 'version'> {
     version: 44
-    paymentType: 'bitcoin' | 'stable-balance'
+    paymentType: 'bitcoin' | 'stable-balance' | 'usdt'
     selectedFederationId: Federation['id'] | null
 }
 

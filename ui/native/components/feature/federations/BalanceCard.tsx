@@ -11,8 +11,10 @@ import {
     selectCurrency,
     selectPaymentType,
     selectStableBalancePending,
+    selectUsdtBalanceMicros,
 } from '@fedi/common/redux'
 import { getCurrencyCode } from '@fedi/common/utils/currency'
+import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import { useAppSelector, useStabilityPool } from '../../../state/hooks'
 import { Column, Row } from '../../ui/Flex'
@@ -43,10 +45,15 @@ export default function WalletBalanceCard({
     const stableBalancePending = useAppSelector(s =>
         selectStableBalancePending(s, federationId),
     )
+    const usdtBalanceMicros = useAppSelector(s =>
+        selectUsdtBalanceMicros(s, federationId),
+    )
     const balanceDisplay = useAppSelector(selectBalanceDisplay)
 
     const onPressTransactions = () => {
         if (recoveryInProgress) return
+        // There is no transaction history screen for USDT yet
+        if (paymentType === 'usdt') return
         navigation.navigate(
             paymentType === 'bitcoin' ? 'Transactions' : 'StabilityHistory',
             { federationId },
@@ -68,6 +75,12 @@ export default function WalletBalanceCard({
             stableBalancePending !== 0
                 ? `${formattedStableBalancePending} ${t('words.pending')}`
                 : null
+    } else if (paymentType === 'usdt') {
+        iconName = 'UsdCircleFilled'
+        iconColor = theme.colors.moneyGreen
+        headerTitle = t('feature.usdt.usdt-balance')
+        primaryAmount = formatUsdtMicros(usdtBalanceMicros)
+        secondaryAmount = null
     }
 
     const style = styles(theme)
@@ -87,7 +100,7 @@ export default function WalletBalanceCard({
                 <SvgImage
                     name="TxnHistory"
                     color={
-                        recoveryInProgress
+                        recoveryInProgress || paymentType === 'usdt'
                             ? theme.colors.lightGrey
                             : theme.colors.primary
                     }

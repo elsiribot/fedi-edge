@@ -6,6 +6,7 @@ import {
     selectReceivesDisabled,
     selectStableBalancePending,
     selectPaymentType,
+    selectUsdtBalanceMicros,
 } from '@fedi/common/redux'
 
 import { usePopupFederationInfo } from './federation'
@@ -23,6 +24,9 @@ export function useWalletButtons(t: TFunction, federationId: string) {
         selectStableBalancePending(s, federationId),
     )
     const paymentType = useCommonSelector(selectPaymentType)
+    const usdtBalanceMicros = useCommonSelector(s =>
+        selectUsdtBalanceMicros(s, federationId),
+    )
 
     const popupInfo = usePopupFederationInfo(federation?.meta ?? {})
     const { recoveryInProgress } = useRecoveryProgress(federationId)
@@ -37,6 +41,10 @@ export function useWalletButtons(t: TFunction, federationId: string) {
             return hasEnded || recoveryInProgress || stableBalanceBlocked
         }
 
+        if (paymentType === 'usdt') {
+            return hasEnded || recoveryInProgress
+        }
+
         return hasEnded || recoveryInProgress || receivesDisabled
     }, [
         paymentType,
@@ -47,6 +55,10 @@ export function useWalletButtons(t: TFunction, federationId: string) {
     ])
 
     const sendDisabled = useMemo(() => {
+        if (paymentType === 'usdt') {
+            return hasEnded || recoveryInProgress || usdtBalanceMicros <= 0
+        }
+
         if (typeof federationBalance !== 'number') return true
 
         if (paymentType === 'stable-balance') {
@@ -60,6 +72,7 @@ export function useWalletButtons(t: TFunction, federationId: string) {
         recoveryInProgress,
         stableBalanceBlocked,
         federationBalance,
+        usdtBalanceMicros,
     ])
 
     const disabledMessage = recoveryInProgress

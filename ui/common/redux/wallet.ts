@@ -75,6 +75,8 @@ type FederationWalletState = {
     supportsRecurringdLnurl: boolean | null
     /** The lnurl for the federation */
     lnurlReceiveCode: string | null
+    /** USDT balance in micros (10^-6 USDT), null until fetched */
+    usdtBalanceMicros: number | null
 }
 
 const initialFederationWalletState = {
@@ -83,6 +85,7 @@ const initialFederationWalletState = {
     averageFeeRate: null,
     supportsRecurringdLnurl: null,
     lnurlReceiveCode: null,
+    usdtBalanceMicros: null,
 } satisfies FederationWalletState
 
 // All wallet state is keyed by federation id to keep federation wallets separate, so it starts as an empty object.
@@ -186,6 +189,15 @@ export const walletSlice = createSlice({
                 }
             },
         )
+
+        builder.addCase(refreshUsdtBalance.fulfilled, (state, action) => {
+            const { federationId } = action.meta.arg
+            const federation = getFederationWalletState(state, federationId)
+            state[federationId] = {
+                ...federation,
+                usdtBalanceMicros: action.payload,
+            }
+        })
     },
 })
 
@@ -513,6 +525,14 @@ export const refreshStabilityPool = createAsyncThunk<
             )
     },
 )
+
+export const refreshUsdtBalance = createAsyncThunk<
+    number,
+    { fedimint: FedimintBridge; federationId: Federation['id'] },
+    { state: CommonState }
+>('wallet/refreshUsdtBalance', async ({ fedimint, federationId }) => {
+    return fedimint.usdtBalance(federationId)
+})
 
 export const increaseStableBalance = createAsyncThunk<
     Promise<StabilityPoolDepositEvent>,
@@ -1034,6 +1054,16 @@ export const selectStabilityPoolVersion = (
     federationId: Federation['id'],
 ) => {
     return selectFederationStabilityPoolConfig(s, federationId)?.version
+}
+
+/**
+ * USDT balance for a federation in micros (10^-6 USDT)
+ * */
+export const selectUsdtBalanceMicros = (
+    s: CommonState,
+    federationId: Federation['id'],
+) => {
+    return selectFederationWalletState(s, federationId).usdtBalanceMicros ?? 0
 }
 
 export const selectSupportsRecurringdLnurl = (

@@ -182,6 +182,9 @@ import StabilityHistory from './StabilityHistory'
 import StabilityReceive from './StabilityReceive'
 import StabilitySend from './StabilitySend'
 import StabilityWithdrawInitiated from './StabilityWithdrawInitiated'
+import UsdtReceive from './UsdtReceive'
+import UsdtSend from './UsdtSend'
+import UsdtWithdrawInitiated from './UsdtWithdrawInitiated'
 import StartRecoveryAssist from './StartRecoveryAssist'
 import StartSocialBackup from './StartSocialBackup'
 import TabsNavigator from './TabsNavigator'
@@ -1295,6 +1298,46 @@ export const MainNavigator = () => {
                                 component={StabilityWithdrawInitiated}
                                 options={() => ({
                                     header: () => <WithdrawInitiatedHeader />,
+                                })}
+                            />
+                            {/* USDT */}
+                            <Stack.Screen
+                                name="UsdtReceive"
+                                component={UsdtReceive}
+                                options={() => ({
+                                    header: () => (
+                                        <CenteredHeader
+                                            backButton
+                                            title={t(
+                                                'feature.usdt.receive-usdt',
+                                            )}
+                                        />
+                                    ),
+                                })}
+                            />
+                            <Stack.Screen
+                                name="UsdtSend"
+                                component={UsdtSend}
+                                options={() => ({
+                                    header: () => (
+                                        <CenteredHeader
+                                            backButton
+                                            title={t('feature.usdt.send-usdt')}
+                                        />
+                                    ),
+                                })}
+                            />
+                            <Stack.Screen
+                                name="UsdtWithdrawInitiated"
+                                component={UsdtWithdrawInitiated}
+                                options={() => ({
+                                    header: () => (
+                                        <CenteredHeader
+                                            title={t(
+                                                'feature.usdt.withdrawal-initiated',
+                                            )}
+                                        />
+                                    ),
                                 })}
                             />
                             {/* Share Logs */}

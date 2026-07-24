@@ -23,6 +23,8 @@ import {
     SPv2DepositEvent,
     SPv2WithdrawalEvent,
     SPv2TransferEvent,
+    UsdtDepositEvent,
+    UsdtWithdrawalEvent,
     RpcStabilityPoolConfig,
     MultispendListedEvent,
     RpcStreamUpdate,
@@ -359,6 +361,8 @@ export type FedimintBridgeEventMap = {
     spv2Deposit: SPv2DepositEvent
     spv2Withdrawal: SPv2WithdrawalEvent
     spv2Transfer: SPv2TransferEvent
+    usdtDeposit: UsdtDepositEvent
+    usdtWithdrawal: UsdtWithdrawalEvent
     recoveryComplete: RecoveryCompleteEvent
     recoveryProgress: RecoveryProgressEvent
     streamUpdate: RpcStreamUpdate<unknown>
