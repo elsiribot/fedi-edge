@@ -114,6 +114,7 @@ impl ModuleInit for FediSocialInit {
 #[async_trait]
 impl ServerModuleInit for FediSocialInit {
     type Module = FediSocial;
+    type Params = ();
 
     fn versions(&self, _core: CoreConsensusVersion) -> &[ModuleConsensusVersion] {
         &[CONSENSUS_VERSION]
@@ -132,6 +133,7 @@ impl ServerModuleInit for FediSocialInit {
         &self,
         peers: &[PeerId],
         _args: &ConfigGenModuleArgs,
+        _params: &Self::Params,
     ) -> BTreeMap<PeerId, ServerModuleConfig> {
         let sks = fedimint_threshold_crypto::SecretKeySet::random(
             peers.to_num_peers().degree(),
@@ -165,6 +167,7 @@ impl ServerModuleInit for FediSocialInit {
         &self,
         peers: &(dyn PeerHandleOps + Send + Sync),
         _args: &ConfigGenModuleArgs,
+        _params: &Self::Params,
     ) -> anyhow::Result<ServerModuleConfig> {
         let (polynomial, sks) = peers.run_dkg_g1().await?;
 

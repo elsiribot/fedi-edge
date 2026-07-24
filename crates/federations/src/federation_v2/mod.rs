@@ -205,6 +205,7 @@ mod mint_ops;
 pub mod spv2_pay_address;
 mod spv2_sweeper_service;
 mod stability_pool_sweeper_service;
+mod usdt;
 mod wallet_ops;
 
 pub const GUARDIAN_STATUS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -442,6 +443,7 @@ impl FederationV2 {
         client_builder.with_module(FediSocialClientInit);
         client_builder.with_module(StabilityPoolClientInit);
         client_builder.with_module(stability_pool_client_old::StabilityPoolClientInit);
+        client_builder.with_module(fedimint_usdt_client::UsdtClientInit);
         let client_builder = client_builder
             .with_iroh_enable_dht(false)
             .with_iroh_enable_next(false);
@@ -543,6 +545,7 @@ impl FederationV2 {
     /// saved to db.
     async fn start_background_tasks(&self) {
         self.subscribe_balance_updates().await;
+        self.spawn_usdt_startup_claimer();
         self.spawn_cancellable("backup_service", move |fed| async move {
             fed.backup_service.run_continuously(&fed.client).await;
         });

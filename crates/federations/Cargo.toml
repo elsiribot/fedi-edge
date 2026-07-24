@@ -19,6 +19,8 @@ fedimint-ln-client = { workspace = true }
 fedimint-api-client = { workspace = true }
 fedimint-ln-common = { workspace = true }
 fedimint-lnv2-client = { workspace = true }
+fedimint-usdt-client = { workspace = true }
+fedimint-usdt-common = { workspace = true }
 fedimint-wallet-client = { workspace = true }
 fedimint-walletv2-client = { workspace = true }
 fedimint-meta-client = { workspace = true }

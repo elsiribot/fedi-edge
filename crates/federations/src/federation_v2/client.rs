@@ -3,6 +3,7 @@ use fedimint_ln_client::LightningClientModule;
 use fedimint_lnv2_client::LightningClientModule as LightningV2ClientModule;
 use fedimint_mint_client::MintClientModule;
 use fedimint_mintv2_client::MintClientModule as MintV2ClientModule;
+use fedimint_usdt_client::UsdtClientModule;
 use fedimint_wallet_client::WalletClientModule;
 use fedimint_walletv2_client::WalletClientModule as WalletV2ClientModule;
 use stability_pool_client_old::StabilityPoolClientModule;
@@ -34,6 +35,9 @@ pub trait ClientExt {
 
     /// Attempt to get the first mint v2 client module instance.
     fn mintv2(&self) -> anyhow::Result<ClientModuleInstance<'_, MintV2ClientModule>>;
+
+    /// Attempt to get the first usdt client module instance.
+    fn usdt(&self) -> anyhow::Result<ClientModuleInstance<'_, UsdtClientModule>>;
 }
 
 impl ClientExt for Client {
@@ -70,5 +74,9 @@ impl ClientExt for Client {
 
     fn mintv2(&self) -> anyhow::Result<ClientModuleInstance<'_, MintV2ClientModule>> {
         self.get_first_module::<MintV2ClientModule>()
+    }
+
+    fn usdt(&self) -> anyhow::Result<ClientModuleInstance<'_, UsdtClientModule>> {
+        self.get_first_module::<UsdtClientModule>()
     }
 }

@@ -36,6 +36,7 @@ pub mod multispend;
 pub mod nostril;
 pub mod sp_transfer;
 pub mod spv2_transfer_meta;
+pub mod usdt;
 
 pub use communities::{CommunityInvite, CommunityInviteV2};
 

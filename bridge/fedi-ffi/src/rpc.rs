@@ -55,6 +55,9 @@ use rpc_types::matrix::{
 use rpc_types::nostril::{RpcNostrPubkey, RpcNostrSecret};
 use rpc_types::sp_transfer::{RpcAccountId, RpcSpTransferState, SpMatrixTransferId};
 use rpc_types::spv2_transfer_meta::Spv2TransferTxMeta;
+use rpc_types::usdt::{
+    RpcUsdtAmount, RpcUsdtDepositStatus, RpcUsdtStatus, RpcUsdtWithdrawalStatus,
+};
 use rpc_types::{
     FrontendMetadata, GuardianStatus, NetworkError, RpcAmount, RpcAppFlavor, RpcEcashInfo,
     RpcEventId, RpcFederation, RpcFederationId, RpcFederationMaybeLoading, RpcFederationPreview,
@@ -1097,6 +1100,79 @@ async fn spv2GuardianRemittanceBalance(
 #[macro_rules_derive(federation_rpc_method!)]
 async fn spv2WithdrawGuardianRemittanceAll(federation: Arc<FederationV2>) -> anyhow::Result<()> {
     federation.spv2_withdraw_guardian_remittance_all().await
+}
+
+// USDT (USDT-on-EVM module; Bitcoin-like send/receive UX, no exchange)
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtSupported(federation: Arc<FederationV2>) -> anyhow::Result<bool> {
+    Ok(federation.usdt_supported())
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtStatus(federation: Arc<FederationV2>) -> anyhow::Result<RpcUsdtStatus> {
+    federation.usdt_status().await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtBalance(federation: Arc<FederationV2>) -> anyhow::Result<RpcUsdtAmount> {
+    federation.usdt_balance().await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtGenerateDepositAddress(federation: Arc<FederationV2>) -> anyhow::Result<String> {
+    federation.usdt_generate_deposit_address().await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtDepositStatus(
+    federation: Arc<FederationV2>,
+    address: String,
+) -> anyhow::Result<RpcUsdtDepositStatus> {
+    federation.usdt_deposit_status(address).await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtListDeposits(
+    federation: Arc<FederationV2>,
+) -> anyhow::Result<Vec<RpcUsdtDepositStatus>> {
+    federation.usdt_list_deposits().await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtCheckDeposits(federation: Arc<FederationV2>) -> anyhow::Result<u32> {
+    federation.usdt_check_deposits().await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtRecoverDeposits(federation: Arc<FederationV2>) -> anyhow::Result<u32> {
+    federation.usdt_recover_deposits().await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtWithdrawFeeQuote(
+    federation: Arc<FederationV2>,
+    amount: RpcUsdtAmount,
+) -> anyhow::Result<RpcUsdtAmount> {
+    federation.usdt_withdraw_fee_quote(amount).await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtWithdraw(
+    federation: Arc<FederationV2>,
+    recipient: String,
+    amount: RpcUsdtAmount,
+    max_fee: RpcUsdtAmount,
+) -> anyhow::Result<String> {
+    federation.usdt_withdraw(recipient, amount, max_fee).await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtWithdrawalStatus(
+    federation: Arc<FederationV2>,
+    txid: String,
+) -> anyhow::Result<RpcUsdtWithdrawalStatus> {
+    federation.usdt_withdrawal_status(txid).await
 }
 
 #[macro_rules_derive(federation_rpc_method!)]
@@ -2698,6 +2774,18 @@ rpc_methods!(RpcMethods {
     spv2ParsePaymentAddress,
     spv2Transfer,
     spv2StartFastSync,
+    // USDT
+    usdtSupported,
+    usdtStatus,
+    usdtBalance,
+    usdtGenerateDepositAddress,
+    usdtDepositStatus,
+    usdtListDeposits,
+    usdtCheckDeposits,
+    usdtRecoverDeposits,
+    usdtWithdrawFeeQuote,
+    usdtWithdraw,
+    usdtWithdrawalStatus,
     // Developer
     getSensitiveLog,
     setSensitiveLog,

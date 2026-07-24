@@ -44,6 +44,7 @@ async fn flaky_starter_test() -> anyhow::Result<()> {
         gw_ldk_second,
         recurringd,
         recurringdv2,
+        anvil: _,
     } = dev_fed(&process_mgr).await?;
 
     // Get clients for seeker, provider, and btc depositor

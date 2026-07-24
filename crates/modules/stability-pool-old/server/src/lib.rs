@@ -80,6 +80,7 @@ impl ModuleInit for StabilityPoolInit {
 #[async_trait]
 impl ServerModuleInit for StabilityPoolInit {
     type Module = StabilityPool;
+    type Params = ();
 
     fn versions(&self, _core: CoreConsensusVersion) -> &[ModuleConsensusVersion] {
         &[CONSENSUS_VERSION]
@@ -97,6 +98,7 @@ impl ServerModuleInit for StabilityPoolInit {
         &self,
         peers: &[PeerId],
         _args: &ConfigGenModuleArgs,
+        _params: &Self::Params,
     ) -> BTreeMap<PeerId, ServerModuleConfig> {
         let mint_cfg: BTreeMap<_, StabilityPoolConfig> = peers
             .iter()
@@ -128,6 +130,7 @@ impl ServerModuleInit for StabilityPoolInit {
         &self,
         peers: &(dyn PeerHandleOps + Send + Sync),
         _args: &ConfigGenModuleArgs,
+        _params: &Self::Params,
     ) -> anyhow::Result<ServerModuleConfig> {
         let server = StabilityPoolConfig {
             private: StabilityPoolConfigPrivate,

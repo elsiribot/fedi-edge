@@ -263,6 +263,44 @@ pub struct NonceReuseCheckFailedEvent {
     pub federation_id: RpcFederationId,
 }
 
+/// A USDT deposit to one of our deposit addresses was claimed into
+/// USDT-denominated e-cash (or its claim failed).
+#[derive(Serialize, Debug, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UsdtDepositEvent {
+    pub federation_id: RpcFederationId,
+    /// 0x-prefixed deposit account address
+    pub address: String,
+    pub state: UsdtDepositState,
+}
+
+#[derive(Serialize, Debug, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(export)]
+pub enum UsdtDepositState {
+    #[serde(rename_all = "camelCase")]
+    Claimed {
+        amount: crate::usdt::RpcUsdtAmount,
+    },
+    #[serde(rename_all = "camelCase")]
+    Failed {
+        reason: String,
+    },
+}
+
+/// Progress of a USDT on-chain withdrawal initiated via `usdtWithdraw`.
+#[derive(Serialize, Debug, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct UsdtWithdrawalEvent {
+    pub federation_id: RpcFederationId,
+    /// Txid of the fedimint transaction that enqueued the withdrawal (the
+    /// id returned by `usdtWithdraw`)
+    pub txid: String,
+    pub state: crate::usdt::RpcUsdtWithdrawalStatus,
+}
+
 #[derive(Debug, TS, VariantNames)]
 #[ts(export)]
 #[ts(rename_all = "camelCase")]
@@ -285,6 +323,8 @@ pub enum Event {
     CommunityMetadataUpdated(CommunityMetadataUpdatedEvent),
     NonceReuseCheckFailed(NonceReuseCheckFailedEvent),
     CommunityMigratedToV2(CommunityMigratedToV2Event),
+    UsdtDeposit(UsdtDepositEvent),
+    UsdtWithdrawal(UsdtWithdrawalEvent),
 }
 
 impl Event {
@@ -538,6 +578,14 @@ pub trait TypedEventExt: IEventSink {
             Event::NonceReuseCheckFailed(event) => {
                 let body = serde_json::to_string(&event).expect("failed to json serialize");
                 IEventSink::event(self, "nonceReuseCheckFailed".into(), body);
+            }
+            Event::UsdtDeposit(event) => {
+                let body = serde_json::to_string(&event).expect("failed to json serialize");
+                IEventSink::event(self, "usdtDeposit".into(), body);
+            }
+            Event::UsdtWithdrawal(event) => {
+                let body = serde_json::to_string(&event).expect("failed to json serialize");
+                IEventSink::event(self, "usdtWithdrawal".into(), body);
             }
         };
     }

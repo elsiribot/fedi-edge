@@ -445,6 +445,11 @@
                 pkgs.ripgrep
                 pkgs.lsof
                 pkgs.rust-bindgen
+                # usdt module: gmp-mpfr-sys (via cggmp21/rug) builds GMP from
+                # source and needs m4; anvil (foundry) is the EVM devnet the
+                # usdt integration tests run against
+                pkgs.m4
+                pkgs.foundry
 
                 pkgs.android-tools
                 androidSdk
