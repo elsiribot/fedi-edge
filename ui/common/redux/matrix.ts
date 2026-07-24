@@ -20,6 +20,8 @@ import {
     selectGlobalCommunityMetadata,
     setGuardianitoBot,
     cancelEcash,
+    refreshUsdtBalance,
+    selectUsdtBalanceMicros,
     selectFeatureFlag,
     selectDefaultMatrixRoom,
 } from '.'
@@ -75,6 +77,7 @@ import {
     RpcSpTransferState,
     RpcTimelineEventItemId,
     RpcTimelineItem,
+    RpcUsdtAmount,
     VectorDiff,
 } from '../types/bindings'
 import amountUtils from '../utils/AmountUtils'
@@ -114,6 +117,7 @@ import {
 import { isBolt11 } from '../utils/parser'
 import { upsertListItem, upsertRecordEntity } from '../utils/redux'
 import { applyStreamUpdates } from '../utils/stream'
+import { formatUsdtMicros } from '../utils/usdt'
 import { loadFromStorage } from './storage'
 
 const log = makeLog('redux/matrix')
@@ -1669,44 +1673,170 @@ export const sendMatrixPaymentRequest = createAsyncThunk<
     },
 )
 
+/**
+ * Push (send) a USDT-denominated ecash payment in chat. Mirrors
+ * `sendMatrixPaymentPush`, but generates USDT ecash and denominates
+ * `amount` in USDT micros (10^-6 USDT) with `unit: 'usdt'`.
+ * USDT ecash has no Fedi fees, so no fee estimation is involved.
+ */
+export const sendMatrixUsdtPaymentPush = createAsyncThunk<
+    string,
+    {
+        fedimint: FedimintBridge
+        federationId: string
+        roomId: MatrixRoom['id']
+        recipientId: MatrixUser['id']
+        amountMicros: RpcUsdtAmount
+        notes?: string
+    },
+    { state: CommonState }
+>(
+    'matrix/sendMatrixUsdtPaymentPush',
+    async (
+        {
+            fedimint,
+            federationId,
+            roomId,
+            recipientId,
+            amountMicros,
+            notes = null,
+        },
+        { getState, dispatch },
+    ) => {
+        const state = getState()
+        const federation = selectLoadedFederation(state, federationId)
+        const matrixAuth = selectMatrixAuth(state)
+        if (!matrixAuth) throw new Error('Not authenticated')
+        if (!federation) throw new Error('Federation not found')
+
+        log.info('sendMatrixUsdtPaymentPush', amountMicros, 'micros')
+
+        const client = fedimint.getMatrixClient()
+
+        const frontendMetadata = {
+            recipientMatrixId: recipientId,
+            senderMatrixId: matrixAuth.userId,
+            initialNotes: notes,
+        } satisfies FrontendMetadata
+
+        const { ecash, operationId } = await fedimint.usdtGenerateEcash(
+            federationId,
+            amountMicros,
+            frontendMetadata,
+        )
+
+        const senderOperationId = operationId
+        const paymentId = uuidv4()
+
+        await client.sendMessage(roomId, {
+            msgtype: 'xyz.fedi.payment',
+            body: `Sent payment of ${formatUsdtMicros(amountMicros)}. Use the Fedi app to accept this payment.`, // TODO: i18n? this only shows to matrix clients, not Fedi users
+            status: 'pushed',
+            paymentId,
+            senderOperationId,
+            senderId: matrixAuth.userId,
+            recipientId,
+            amount: amountMicros,
+            unit: 'usdt',
+            ecash,
+            federationId: federation.id,
+        })
+
+        dispatch(refreshUsdtBalance({ fedimint, federationId }))
+
+        return senderOperationId
+    },
+)
+
+/**
+ * Request a USDT-denominated ecash payment in chat. Mirrors
+ * `sendMatrixPaymentRequest` with `amount` in USDT micros and
+ * `unit: 'usdt'`.
+ */
+export const sendMatrixUsdtPaymentRequest = createAsyncThunk<
+    void,
+    {
+        fedimint: FedimintBridge
+        federationId: string
+        roomId: MatrixRoom['id']
+        amountMicros: RpcUsdtAmount
+    },
+    { state: CommonState }
+>(
+    'matrix/sendMatrixUsdtPaymentRequest',
+    async ({ fedimint, federationId, roomId, amountMicros }, { getState }) => {
+        const matrixAuth = selectMatrixAuth(getState())
+        if (!matrixAuth) throw new Error('Not authenticated')
+
+        log.info('sendMatrixUsdtPaymentRequest', amountMicros, 'micros')
+
+        const client = fedimint.getMatrixClient()
+
+        const paymentId = uuidv4()
+
+        await client.sendMessage(roomId, {
+            msgtype: 'xyz.fedi.payment',
+            body: `Requested payment of ${formatUsdtMicros(amountMicros)}. Use the Fedi app to complete this request.`, // TODO: i18n?
+            paymentId,
+            status: 'requested',
+            recipientId: matrixAuth.userId,
+            amount: amountMicros,
+            unit: 'usdt',
+            federationId,
+        })
+    },
+)
+
 export const claimMatrixPayment = createAsyncThunk<
     void,
     { fedimint: FedimintBridge; event: MatrixPaymentEvent },
     { state: CommonState }
->('matrix/claimMatrixPayment', async ({ fedimint, event }, { getState }) => {
-    const client = fedimint.getMatrixClient()
-    const matrixAuth = selectMatrixAuth(getState())
-    if (!matrixAuth) throw new Error('Not authenticated')
+>(
+    'matrix/claimMatrixPayment',
+    async ({ fedimint, event }, { getState, dispatch }) => {
+        const client = fedimint.getMatrixClient()
+        const matrixAuth = selectMatrixAuth(getState())
+        if (!matrixAuth) throw new Error('Not authenticated')
 
-    const { ecash, federationId } = event.content
-    if (!ecash) throw new Error('Payment message is missing ecash token')
-    if (!federationId)
-        throw new Error('Payment message is missing federationId')
+        const { ecash, federationId } = event.content
+        if (!ecash) throw new Error('Payment message is missing ecash token')
+        if (!federationId)
+            throw new Error('Payment message is missing federationId')
 
-    const frontendMetadata = {
-        recipientMatrixId: matrixAuth.userId,
-        senderMatrixId: event.content.senderId || null,
-        initialNotes: null,
-    } satisfies FrontendMetadata
+        let receiverOperationId: string | undefined
+        if (event.content.unit === 'usdt') {
+            // USDT-denominated ecash is redeemed via the USDT module and
+            // has no receiver operation ID
+            await fedimint.usdtReceiveEcash(federationId, ecash)
+            dispatch(refreshUsdtBalance({ fedimint, federationId }))
+        } else {
+            const frontendMetadata = {
+                recipientMatrixId: matrixAuth.userId,
+                senderMatrixId: event.content.senderId || null,
+                initialNotes: null,
+            } satisfies FrontendMetadata
 
-    // receive the ecash and get the receiver operation ID
-    const [, receiverOperationId] = await fedimint.receiveEcash(
-        ecash,
-        federationId,
-        frontendMetadata,
-    )
+            // receive the ecash and get the receiver operation ID
+            const [, operationId] = await fedimint.receiveEcash(
+                ecash,
+                federationId,
+                frontendMetadata,
+            )
+            receiverOperationId = operationId
+        }
 
-    // send back the same payment event with updated status
-    // old clients will ignore receiverOperationId, new clients will use it
-    await client.sendMessage(event.roomId, {
-        ...event.content,
-        body: 'Payment received.', // TODO: i18n?
-        status: 'received',
-        receiverOperationId, // will be undefined for old clients, which is fine
-    })
+        // send back the same payment event with updated status
+        // old clients will ignore receiverOperationId, new clients will use it
+        await client.sendMessage(event.roomId, {
+            ...event.content,
+            body: 'Payment received.', // TODO: i18n?
+            status: 'received',
+            receiverOperationId, // will be undefined for old clients, which is fine
+        })
 
-    await client.markRoomAsUnread(event.roomId, true)
-})
+        await client.markRoomAsUnread(event.roomId, true)
+    },
+)
 
 export const tryReclaimMatrixPayment = createAsyncThunk<
     void,
@@ -1722,6 +1852,25 @@ export const tryReclaimMatrixPayment = createAsyncThunk<
             event.content.status !== 'rejected'
         )
             return
+
+        if (event.content.unit === 'usdt') {
+            log.info(
+                'Reclaiming rejected USDT payment with operation ID:',
+                event.content.senderOperationId,
+            )
+            // USDT notes are reclaimed by redeeming them back ourselves
+            await fedimint.usdtReceiveEcash(
+                event.content.federationId,
+                event.content.ecash,
+            )
+            dispatch(
+                refreshUsdtBalance({
+                    fedimint,
+                    federationId: event.content.federationId,
+                }),
+            )
+            return
+        }
 
         const transaction = await fedimint.getTransaction(
             event.content.federationId,
@@ -1860,15 +2009,30 @@ export const checkForReceivablePayments = createAsyncThunk<
 
 export const cancelMatrixPayment = createAsyncThunk<
     void,
-    { fedimint: FedimintBridge; event: MatrixPaymentEvent }
->('matrix/cancelMatrixPayment', async ({ fedimint, event }) => {
+    { fedimint: FedimintBridge; event: MatrixPaymentEvent },
+    { state: CommonState }
+>('matrix/cancelMatrixPayment', async ({ fedimint, event }, { dispatch }) => {
     const client = fedimint.getMatrixClient()
 
     if (event.content.ecash && event.content.federationId) {
-        await fedimint.cancelEcash(
-            event.content.ecash,
-            event.content.federationId,
-        )
+        if (event.content.unit === 'usdt') {
+            // USDT notes are reclaimed by redeeming them back ourselves
+            await fedimint.usdtReceiveEcash(
+                event.content.federationId,
+                event.content.ecash,
+            )
+            dispatch(
+                refreshUsdtBalance({
+                    fedimint,
+                    federationId: event.content.federationId,
+                }),
+            )
+        } else {
+            await fedimint.cancelEcash(
+                event.content.ecash,
+                event.content.federationId,
+            )
+        }
     }
 
     await client.sendMessage(event.roomId, {
@@ -1884,7 +2048,7 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
     { state: CommonState }
 >(
     'matrix/acceptMatrixPaymentRequest',
-    async ({ fedimint, event }, { getState }) => {
+    async ({ fedimint, event }, { getState, dispatch }) => {
         const matrixAuth = selectMatrixAuth(getState())
         if (!matrixAuth) throw new Error('Not authenticated')
 
@@ -1896,17 +2060,42 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
         if (!federationId) throw new Error('Payment missing federationId')
         if (!amount) throw new Error('Payment request missing amount')
 
-        const federationMeta =
-            selectLoadedFederation(getState(), federationId)?.meta ?? {}
-        const includeInvite = shouldShowInviteCode(federationMeta)
-
-        const msats = amount as MSats
+        const client = fedimint.getMatrixClient()
 
         const frontendMetadata = {
             recipientMatrixId: recipientId || null,
             senderMatrixId: matrixAuth.userId,
             initialNotes: '',
         } satisfies FrontendMetadata
+
+        // USDT-denominated requests carry the amount in micros and are
+        // paid with USDT ecash (no Fedi fees, no invite code embedding)
+        if (event.content.unit === 'usdt') {
+            const { ecash, operationId: senderOperationId } =
+                await fedimint.usdtGenerateEcash(
+                    federationId,
+                    amount,
+                    frontendMetadata,
+                )
+
+            await client.sendMessage(event.roomId, {
+                ...event.content,
+                body: `Sent payment of ${formatUsdtMicros(amount)}.`, // TODO: i18n?
+                status: 'accepted',
+                senderId: matrixAuth.userId,
+                senderOperationId,
+                ecash,
+            })
+
+            dispatch(refreshUsdtBalance({ fedimint, federationId }))
+            return
+        }
+
+        const federationMeta =
+            selectLoadedFederation(getState(), federationId)?.meta ?? {}
+        const includeInvite = shouldShowInviteCode(federationMeta)
+
+        const msats = amount as MSats
 
         const { ecash, operationId: senderOperationId } =
             await fedimint.generateEcash(
@@ -1915,8 +2104,6 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
                 includeInvite,
                 frontendMetadata,
             )
-
-        const client = fedimint.getMatrixClient()
 
         // send the payment as accepted (not pushed)
         await client.sendMessage(event.roomId, {
@@ -3079,6 +3266,9 @@ export const selectCanPayFromOtherFeds = createSelector(
     (s: CommonState) => selectLoadedFederations(s),
     (s: CommonState, chatPayment: MatrixPaymentEvent) => chatPayment,
     (federations, chatPayment): boolean => {
+        // USDT-denominated payments can only be paid from the federation
+        // whose mint issued the USDT ecash
+        if (chatPayment.content.unit === 'usdt') return false
         return !!federations.find(
             f => f.balance && f.balance > chatPayment.content.amount,
         )
@@ -3088,7 +3278,20 @@ export const selectCanPayFromOtherFeds = createSelector(
 export const selectCanSendPayment = createSelector(
     (s: CommonState) => selectLoadedFederations(s),
     (s: CommonState, chatPayment: MatrixPaymentEvent) => chatPayment,
-    (federations, chatPayment): boolean => {
+    (s: CommonState, chatPayment: MatrixPaymentEvent) =>
+        chatPayment.content.federationId
+            ? selectUsdtBalanceMicros(s, chatPayment.content.federationId)
+            : 0,
+    (federations, chatPayment, usdtBalanceMicros): boolean => {
+        // USDT payments are denominated in micros and checked against the
+        // federation's USDT balance (no Fedi fees for USDT)
+        if (chatPayment.content.unit === 'usdt') {
+            return (
+                !!federations.find(
+                    f => f.id === chatPayment.content.federationId,
+                ) && usdtBalanceMicros >= chatPayment.content.amount
+            )
+        }
         return !!federations.find(
             f =>
                 f.id === chatPayment.content.federationId &&

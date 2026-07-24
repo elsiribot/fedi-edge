@@ -56,7 +56,8 @@ use rpc_types::nostril::{RpcNostrPubkey, RpcNostrSecret};
 use rpc_types::sp_transfer::{RpcAccountId, RpcSpTransferState, SpMatrixTransferId};
 use rpc_types::spv2_transfer_meta::Spv2TransferTxMeta;
 use rpc_types::usdt::{
-    RpcUsdtAmount, RpcUsdtDepositStatus, RpcUsdtStatus, RpcUsdtWithdrawalStatus,
+    RpcUsdtAmount, RpcUsdtDepositStatus, RpcUsdtGenerateEcashResponse, RpcUsdtStatus,
+    RpcUsdtWithdrawalStatus,
 };
 use rpc_types::{
     FrontendMetadata, GuardianStatus, NetworkError, RpcAmount, RpcAppFlavor, RpcEcashInfo,
@@ -1173,6 +1174,25 @@ async fn usdtWithdrawalStatus(
     txid: String,
 ) -> anyhow::Result<RpcUsdtWithdrawalStatus> {
     federation.usdt_withdrawal_status(txid).await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtGenerateEcash(
+    federation: Arc<FederationV2>,
+    amount: RpcUsdtAmount,
+    frontend_metadata: FrontendMetadata,
+) -> anyhow::Result<RpcUsdtGenerateEcashResponse> {
+    federation
+        .usdt_generate_ecash(amount, frontend_metadata)
+        .await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtReceiveEcash(
+    federation: Arc<FederationV2>,
+    ecash: String,
+) -> anyhow::Result<RpcUsdtAmount> {
+    federation.usdt_receive_ecash(ecash).await
 }
 
 #[macro_rules_derive(federation_rpc_method!)]
@@ -2786,6 +2806,8 @@ rpc_methods!(RpcMethods {
     usdtWithdrawFeeQuote,
     usdtWithdraw,
     usdtWithdrawalStatus,
+    usdtGenerateEcash,
+    usdtReceiveEcash,
     // Developer
     getSensitiveLog,
     setSensitiveLog,

@@ -384,6 +384,26 @@ export class FedimintBridge {
         return this.rpcTyped('usdtWithdrawalStatus', { federationId, txid })
     }
 
+    async usdtGenerateEcash(
+        federationId: string,
+        amount: RpcUsdtAmount,
+        frontendMetadata: FrontendMetadata = {
+            initialNotes: null,
+            recipientMatrixId: null,
+            senderMatrixId: null,
+        },
+    ) {
+        return this.rpcTyped('usdtGenerateEcash', {
+            federationId,
+            amount,
+            frontendMetadata,
+        })
+    }
+
+    async usdtReceiveEcash(federationId: string, ecash: string) {
+        return this.rpcTyped('usdtReceiveEcash', { federationId, ecash })
+    }
+
     async listTransactions(
         federationId: string,
         startTime?: number,

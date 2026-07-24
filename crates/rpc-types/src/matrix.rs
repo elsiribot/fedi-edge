@@ -1231,6 +1231,11 @@ pub struct RpcPaymentMessageContent {
     #[ts(optional)]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invite_code: Option<String>,
+    /// Unit the payment's `amount`/`ecash` are denominated in. Absent means
+    /// Bitcoin msats (all payments predating multi-asset support).
+    #[ts(optional)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<crate::RpcEcashUnit>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, TS)]

@@ -201,7 +201,14 @@ async function handleFCMNotification(m, isForeground = true) {
 
 //startup code
 install()
-initializePushNotificationListeners()
+try {
+    // The dev flavor ships without a Firebase config (google-services
+    // processing is disabled for it), so FCM is unavailable — skip push
+    // listeners instead of red-screening at boot.
+    initializePushNotificationListeners()
+} catch (err) {
+    log.warn('Push notifications unavailable, skipping listeners', err)
+}
 //end startup code
 // Register the app component
 AppRegistry.registerComponent(appName, () => App)

@@ -110,6 +110,7 @@ import {
     areChatListRoomsEqual,
     areMatrixRoomPreviewInputsEqual,
 } from '../utils/matrix'
+import { formatUsdtMicros } from '../utils/usdt'
 import { useAmountFormatter } from './amount'
 import { useFedimint } from './fedimint'
 import { useCommonDispatch, useCommonSelector } from './redux'
@@ -1465,6 +1466,15 @@ export function useMatrixPaymentTransaction({
 
         const isSentByMe = event.content.senderId === currentUserId
 
+        // USDT payment operations don't appear in the bitcoin transaction
+        // history, so don't attempt to fetch a transaction for them
+        if (event.content.unit === 'usdt') {
+            setHasTriedFetch(true)
+            setTransaction(null)
+            setIsLoading(false)
+            return
+        }
+
         // for legacy payments without senderOperationId (from old clients),
         // we can't fetch transaction history, so just mark as tried and return null
         if (isSentByMe && !senderOperationId) {
@@ -2022,7 +2032,7 @@ export function useMatrixRoomPreview({
         if (
             preferredPreviewRoom.preview.content.msgtype === 'xyz.fedi.payment'
         ) {
-            const { amount, senderId, recipientId } =
+            const { amount, senderId, recipientId, unit } =
                 preferredPreviewRoom.preview.content
 
             let messageKey = 'feature.receive.they-requested-amount-unit'
@@ -2033,6 +2043,14 @@ export function useMatrixRoomPreview({
                 messageKey = 'feature.send.they-sent-amount-unit'
             else if (recipientId === myId)
                 messageKey = 'feature.receive.you-requested-amount-unit'
+
+            // USDT payments carry the amount in USDT micros
+            if (unit === 'usdt') {
+                return t(messageKey as ResourceKey, {
+                    amount: formatUsdtMicros(amount, { symbol: false }),
+                    unit: 'USDT',
+                }) as string
+            }
 
             return t(messageKey as ResourceKey, {
                 amount: amountUtils.formatSats(

@@ -987,6 +987,8 @@ export type RpcMethods = {
     usdtWithdrawFeeQuote: [usdtWithdrawFeeQuote, RpcUsdtAmount]
     usdtWithdraw: [usdtWithdraw, string]
     usdtWithdrawalStatus: [usdtWithdrawalStatus, RpcUsdtWithdrawalStatus]
+    usdtGenerateEcash: [usdtGenerateEcash, RpcUsdtGenerateEcashResponse]
+    usdtReceiveEcash: [usdtReceiveEcash, RpcUsdtAmount]
     getSensitiveLog: [getSensitiveLog, boolean]
     setSensitiveLog: [setSensitiveLog, null]
     internalMarkBridgeExport: [internalMarkBridgeExport, null]
@@ -1251,6 +1253,11 @@ export type RpcPaymentMessageContent = {
     federationId?: string
     bolt11?: string
     inviteCode?: string
+    /**
+     * Unit the payment's `amount`/`ecash` are denominated in. Absent means
+     * Bitcoin msats (all payments predating multi-asset support).
+     */
+    unit?: RpcEcashUnit
 }
 
 export type RpcPeerId = string
@@ -1813,6 +1820,15 @@ export type RpcUsdtDepositStatus = {
      * credited - claimed; a background claimer turns this into e-cash
      */
     claimable: RpcUsdtAmount
+}
+
+/**
+ * Result of generating USDT-denominated e-cash notes (e.g. for an in-chat
+ * payment). No Fedi fees are charged on USDT e-cash.
+ */
+export type RpcUsdtGenerateEcashResponse = {
+    ecash: string
+    operationId: RpcOperationId
 }
 
 /**
@@ -2822,7 +2838,15 @@ export type usdtDepositStatus = {
 
 export type usdtGenerateDepositAddress = { federationId: RpcFederationId }
 
+export type usdtGenerateEcash = {
+    federationId: RpcFederationId
+    amount: RpcUsdtAmount
+    frontendMetadata: FrontendMetadata
+}
+
 export type usdtListDeposits = { federationId: RpcFederationId }
+
+export type usdtReceiveEcash = { federationId: RpcFederationId; ecash: string }
 
 export type usdtRecoverDeposits = { federationId: RpcFederationId }
 

@@ -60,6 +60,7 @@ import { makeLog } from './log'
 import { constructUrl } from './neverthrow'
 import { isBolt11 } from './parser'
 import { coerceTxn } from './transaction'
+import { formatUsdtMicros } from './usdt'
 
 const log = makeLog('common/utils/matrix')
 
@@ -489,6 +490,46 @@ export const makeMatrixPaymentText = ({
             bolt11,
         },
     } = event
+
+    // USDT-denominated payments carry the amount in USDT micros and are
+    // displayed as "X.XX USDT" instead of fiat + SATS
+    if (event.content.unit === 'usdt') {
+        const usdtStringParams = {
+            name: eventSender?.displayName || matrixIdToUsername(eventSenderId),
+            recipient:
+                paymentRecipient?.displayName ||
+                matrixIdToUsername(paymentRecipientId),
+            amount: formatUsdtMicros(amount),
+        }
+
+        if (eventSenderId === paymentRecipientId) {
+            if (eventSenderId === myId) {
+                return t(
+                    'feature.usdt.you-requested-payment',
+                    usdtStringParams,
+                )
+            } else {
+                return t(
+                    'feature.usdt.they-requested-payment',
+                    usdtStringParams,
+                )
+            }
+        } else if (paymentRecipientId === myId) {
+            return t('feature.usdt.they-sent-payment', usdtStringParams)
+        } else if (paymentSenderId === myId) {
+            return t('feature.usdt.you-sent-payment', usdtStringParams)
+        } else {
+            return t('feature.usdt.other-sent-payment', {
+                ...usdtStringParams,
+                name:
+                    paymentSender?.displayName ||
+                    matrixIdToUsername(paymentSenderId),
+                recipient:
+                    eventSender?.displayName ||
+                    matrixIdToUsername(eventSenderId),
+            })
+        }
+    }
 
     const { formattedPrimaryAmount, formattedSecondaryAmount } = transaction
         ? makeFormattedAmountsFromTxn(coerceTxn(transaction))

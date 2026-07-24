@@ -11,15 +11,24 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use fedimint_core::base32::{FEDIMINT_PREFIX, decode_prefixed, encode_prefixed};
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
 use fedimint_core::task::sleep;
 use fedimint_core::{OutPoint, TransactionId};
+use fedimint_mintv2_client::{
+    ECash as MintV2ECash, FinalReceiveOperationState as MintV2FinalReceiveOperationState,
+};
 use fedimint_usdt_client::db::{ClaimKeyKey, ClaimKeyPrefixAll};
 use fedimint_usdt_common::{BootstrapState, EvmAddress, USDT_UNIT, UsdtAmount, WithdrawalStatus};
 use futures::StreamExt;
+use rpc_types::error::ErrorCode;
 use rpc_types::event::{Event, UsdtDepositEvent, UsdtDepositState, UsdtWithdrawalEvent};
 use rpc_types::usdt::{
-    RpcUsdtAmount, RpcUsdtDepositStatus, RpcUsdtStatus, RpcUsdtWithdrawalStatus,
+    RpcUsdtAmount, RpcUsdtDepositStatus, RpcUsdtGenerateEcashResponse, RpcUsdtStatus,
+    RpcUsdtWithdrawalStatus,
+};
+use rpc_types::{
+    EcashReceiveMetadata, EcashReceiveReason, EcashSendMetadata, FrontendMetadata, RpcAmount,
 };
 use rpc_types::event::TypedEventExt as _;
 use tracing::{info, instrument, warn};
@@ -234,6 +243,69 @@ impl FederationV2 {
             .withdrawal_status(OutPoint { txid, out_idx: 0 })
             .await?;
         Ok(convert_withdrawal_status(status.status))
+    }
+
+    /// Generates USDT-denominated e-cash notes (amount in 10^-6 USDT units),
+    /// e.g. for an in-chat payment. Per product decision, USDT e-cash
+    /// carries no Fedi fees.
+    pub async fn usdt_generate_ecash(
+        &self,
+        amount: RpcUsdtAmount,
+        frontend_meta: FrontendMetadata,
+    ) -> Result<RpcUsdtGenerateEcashResponse> {
+        let _guard = self.generate_ecash_lock.lock().await;
+        let mintv2 = self.client.mintv2()?;
+        if mintv2.amount_unit() != USDT_UNIT {
+            bail!("this federation's mint is not USDT-denominated");
+        }
+        if amount.0 == 0 {
+            bail!("amount must be positive");
+        }
+        let spend_guard = self.spend_guard.lock().await;
+        let balance = self.client.get_balance_for_unit(USDT_UNIT).await?;
+        if amount.0 > balance.msats {
+            bail!(ErrorCode::InsufficientBalance(RpcAmount(balance)));
+        }
+        let custom_meta = serde_json::to_value(EcashSendMetadata {
+            internal: false,
+            frontend_metadata: Some(frontend_meta),
+        })?;
+        let (operation_id, ecash) = mintv2
+            .send(fedimint_core::Amount::from_msats(amount.0), custom_meta)
+            .await?;
+        drop(spend_guard);
+        let ecash = encode_prefixed(FEDIMINT_PREFIX, &ecash);
+        Ok(RpcUsdtGenerateEcashResponse {
+            ecash,
+            operation_id: rpc_types::RpcOperationId(operation_id),
+        })
+    }
+
+    /// Redeems USDT-denominated e-cash notes into our balance (fee-free),
+    /// returning the received amount in 10^-6 USDT units.
+    pub async fn usdt_receive_ecash(&self, ecash: String) -> Result<RpcUsdtAmount> {
+        let mintv2 = self.client.mintv2()?;
+        if mintv2.amount_unit() != USDT_UNIT {
+            bail!("this federation's mint is not USDT-denominated");
+        }
+        let decoded: MintV2ECash = decode_prefixed(FEDIMINT_PREFIX, &ecash)?;
+        let amount = decoded.amount();
+        let custom_meta = serde_json::to_value(EcashReceiveMetadata {
+            internal: false,
+            reason: EcashReceiveReason::Receive,
+            frontend_metadata: None,
+        })?;
+        let operation_id = mintv2.receive(decoded, custom_meta).await?;
+        let final_state = mintv2
+            .await_final_receive_operation_state(operation_id)
+            .await?;
+        self.send_transaction_event(operation_id).await;
+        match final_state {
+            MintV2FinalReceiveOperationState::Success => Ok(RpcUsdtAmount(amount.msats)),
+            MintV2FinalReceiveOperationState::Rejected => {
+                bail!("e-cash was rejected (possibly already spent)")
+            }
+        }
     }
 
     /// Startup pass: claim anything already claimable for our known deposit

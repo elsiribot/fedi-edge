@@ -46,6 +46,16 @@ pub enum RpcUsdtWithdrawalStatus {
     },
 }
 
+/// Result of generating USDT-denominated e-cash notes (e.g. for an in-chat
+/// payment). No Fedi fees are charged on USDT e-cash.
+#[derive(Debug, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RpcUsdtGenerateEcashResponse {
+    pub ecash: String,
+    pub operation_id: crate::RpcOperationId,
+}
+
 /// Federation-side USDT module readiness (whether new deposit addresses can
 /// be handed out).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

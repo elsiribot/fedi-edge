@@ -14,8 +14,11 @@ import {
     selectMatrixRoomIsReadOnly,
     selectMessageToEdit,
     selectPaymentFederation,
+    selectUsdtBalanceMicros,
     sendMatrixPaymentPush,
     sendMatrixPaymentRequest,
+    sendMatrixUsdtPaymentPush,
+    sendMatrixUsdtPaymentRequest,
     setChatDraft,
     setLastUsedFederationId,
     setMatrixDisplayName,
@@ -170,6 +173,85 @@ export const useChatPaymentPush = (
     return {
         isProcessing,
         handleSendPayment,
+    }
+}
+
+/**
+ * Utilities for sending / requesting USDT-denominated ecash payments in
+ * chat. Used when the selected payment federation's ecash is
+ * USDT-denominated (USDT-only federation). Amounts are in USDT micros
+ * (10^-6 USDT). USDT ecash payments have no Fedi fees.
+ */
+export const useChatUsdtPayment = (
+    t: TFunction,
+    roomId: string | undefined,
+    recipientId: string,
+) => {
+    const toast = useToast()
+    const dispatch = useCommonDispatch()
+    const fedimint = useFedimint()
+    const paymentFederation = useCommonSelector(selectPaymentFederation)
+    const federationId = paymentFederation?.id || ''
+    const balanceMicros = useCommonSelector(s =>
+        selectUsdtBalanceMicros(s, federationId),
+    )
+    const [isProcessing, setIsProcessing] = useState<boolean>(false)
+
+    const handleSendUsdtPayment = useCallback(
+        async (amountMicros: number, onSuccess: () => void, notes?: string) => {
+            if (!federationId || !roomId || !amountMicros) return
+            setIsProcessing(true)
+            try {
+                await dispatch(
+                    sendMatrixUsdtPaymentPush({
+                        fedimint,
+                        federationId,
+                        roomId,
+                        recipientId,
+                        amountMicros,
+                        notes,
+                    }),
+                ).unwrap()
+                dispatch(setLastUsedFederationId(federationId))
+                onSuccess()
+            } catch (err) {
+                toast.error(t, err, 'errors.unknown-error')
+            }
+            setIsProcessing(false)
+        },
+        [dispatch, federationId, fedimint, recipientId, roomId, t, toast],
+    )
+
+    const handleRequestUsdtPayment = useCallback(
+        async (amountMicros: number, onSuccess: () => void) => {
+            if (!federationId)
+                return toast.error(t, 'errors.please-join-a-federation')
+            if (!roomId || !amountMicros) return
+            setIsProcessing(true)
+            try {
+                await dispatch(
+                    sendMatrixUsdtPaymentRequest({
+                        fedimint,
+                        federationId,
+                        roomId,
+                        amountMicros,
+                    }),
+                ).unwrap()
+                onSuccess()
+            } catch (err) {
+                toast.error(t, err, 'errors.unknown-error')
+            }
+            setIsProcessing(false)
+        },
+        [dispatch, federationId, fedimint, roomId, t, toast],
+    )
+
+    return {
+        federationId,
+        balanceMicros,
+        isProcessing,
+        handleSendUsdtPayment,
+        handleRequestUsdtPayment,
     }
 }
 

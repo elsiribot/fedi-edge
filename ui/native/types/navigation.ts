@@ -134,11 +134,20 @@ export type RootStackParamList = {
     ConfirmJoinPrivateGroup: { roomId: string }
     RoomLink: { roomId: string }
     ConfirmSendEcash: { amount: Sats; notes?: string }
-    ConfirmSendChatPayment: {
-        amount: Sats
-        roomId: string
-        notes?: string
-    }
+    ConfirmSendChatPayment:
+        | {
+              amount: Sats
+              roomId: string
+              notes?: string
+              unit?: undefined
+          }
+        | {
+              // USDT-denominated chat payment, amount in USDT micros
+              unit: 'usdt'
+              amountMicros: number
+              roomId: string
+              notes?: string
+          }
     ConfirmRecoveryAssist: { federationId: Federation['id'] }
     ConfirmReceiveOffline: { ecash: string; notes?: string }
     ConfirmReceiveCashu: { parsedData: ParsedCashuEcash; notes?: string }

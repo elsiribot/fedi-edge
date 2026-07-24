@@ -138,6 +138,39 @@ it('preserves existing operation IDs', () => {
     expect(paymentEvent.content.receiverOperationId).toBe('receiver-op-456')
 })
 
+// BUSINESS: USDT-denominated payments keep their unit (and micros amount)
+// through status updates so the bubble keeps rendering "X.XX USDT"
+it('preserves the usdt unit when merging latest status into initial event content', () => {
+    const pushedEvent = createMockPaymentEvent({
+        id: 'event1' as RpcTimelineEventItemId,
+        content: {
+            paymentId: 'pay123',
+            status: 'pushed',
+            amount: 1_500_000, // USDT micros
+            unit: 'usdt',
+            senderOperationId: 'sender-op-123',
+        },
+    })
+    const receivedEvent = createMockPaymentEvent({
+        id: 'event2' as RpcTimelineEventItemId,
+        content: {
+            paymentId: 'pay123',
+            status: 'received',
+            amount: 1_500_000,
+            unit: 'usdt',
+            senderOperationId: 'sender-op-123',
+        },
+    })
+
+    const result = consolidatePaymentEvents([pushedEvent, receivedEvent])
+
+    expect(result).toHaveLength(1)
+    const paymentEvent = result[0] as MatrixPaymentEvent
+    expect(paymentEvent.content.status).toBe('received')
+    expect(paymentEvent.content.unit).toBe('usdt')
+    expect(paymentEvent.content.amount).toBe(1_500_000)
+})
+
 // BUSINESS: Multiple payments in same chat are handled independently
 it('handles multiple different payment IDs correctly', () => {
     const payment1Event = createMockPaymentEvent({

@@ -5,11 +5,13 @@ import { useTranslation } from 'react-i18next'
 import { Keyboard } from 'react-native'
 
 import { useChatPaymentUtils } from '@fedi/common/hooks/chat'
+import { useIsUsdtOnlyFederation } from '@fedi/common/hooks/federation'
 import {
     selectMatrixDirectMessageRoom,
     selectPaymentFederation,
 } from '@fedi/common/redux'
 
+import ChatWalletUsdt from '../components/feature/chat/ChatWalletUsdt'
 import FederationWalletSelector from '../components/feature/send/FederationWalletSelector'
 import { AmountScreen } from '../components/ui/AmountScreen'
 import { Column, Row } from '../components/ui/Flex'
@@ -28,6 +30,11 @@ const ChatWallet: React.FC<Props> = ({ navigation, route }: Props) => {
         selectMatrixDirectMessageRoom(s, recipientId),
     )
     const paymentFederation = useAppSelector(selectPaymentFederation)
+    // USDT-only federations denominate their ecash in USDT, so the chat
+    // payment flow uses USD amounts instead of sats
+    const isUsdtOnlyFederation = useIsUsdtOnlyFederation(
+        paymentFederation?.id || '',
+    )
 
     useSyncCurrencyRatesOnFocus(paymentFederation?.id)
 
@@ -80,6 +87,23 @@ const ChatWallet: React.FC<Props> = ({ navigation, route }: Props) => {
                     {t('errors.chat-member-not-found')}
                 </Text>
             </Column>
+        )
+    }
+
+    if (isUsdtOnlyFederation) {
+        return (
+            <ChatWalletUsdt
+                roomId={existingRoom.id}
+                recipientId={recipientId}
+                onSendConfirm={amountMicros => {
+                    navigation.navigate('ConfirmSendChatPayment', {
+                        unit: 'usdt',
+                        amountMicros,
+                        roomId: existingRoom.id,
+                    })
+                }}
+                onRequestSuccess={backToChat}
+            />
         )
     }
 

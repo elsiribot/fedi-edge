@@ -96,8 +96,11 @@ export const PaymentEventButtons = ({
 
 export const PaymentEventContainer = ({
     children,
+    usdt = false,
 }: {
     children: React.ReactNode
+    /** USDT-denominated payments get a moneyGreen bubble instead of orange */
+    usdt?: boolean
 }) => {
     const { theme } = useTheme()
     const style = styles(theme)
@@ -105,7 +108,10 @@ export const PaymentEventContainer = ({
     return (
         <OptionalGradient
             gradient={bubbleGradient}
-            style={[style.bubbleInner, style.orangeBubble]}>
+            style={[
+                style.bubbleInner,
+                usdt ? style.usdtBubble : style.orangeBubble,
+            ]}>
             {children}
         </OptionalGradient>
     )
@@ -115,6 +121,7 @@ const ChatPaymentEvent: React.FC<Props> = ({ event }: Props) => {
     const { t } = useTranslation()
     const toast = useToast()
     const { theme } = useTheme()
+    const style = styles(theme)
     const navigation = useNavigation<NavigationHook>()
 
     const {
@@ -161,11 +168,30 @@ const ChatPaymentEvent: React.FC<Props> = ({ event }: Props) => {
         )
     }
 
+    const isUsdt = event.content.unit === 'usdt'
+
     return (
-        <PaymentEventContainer>
+        <PaymentEventContainer usdt={isUsdt}>
             <>
                 <Column gap="lg">
-                    <Text color={theme.colors.secondary}>{messageText}</Text>
+                    {isUsdt ? (
+                        <Row align="center" gap="xs">
+                            <SvgImage
+                                name="UsdCircleFilled"
+                                size={16}
+                                color={theme.colors.secondary}
+                            />
+                            <Text
+                                color={theme.colors.secondary}
+                                style={style.usdtMessageText}>
+                                {messageText}
+                            </Text>
+                        </Row>
+                    ) : (
+                        <Text color={theme.colors.secondary}>
+                            {messageText}
+                        </Text>
+                    )}
                     {isSentByMe && transaction?.txnNotes && (
                         <Text color={theme.colors.secondary}>
                             <Text bold color={theme.colors.secondary}>
@@ -228,6 +254,12 @@ const styles = (theme: Theme) =>
         },
         orangeBubble: {
             backgroundColor: theme.colors.orange,
+        },
+        usdtBubble: {
+            backgroundColor: theme.colors.moneyGreen,
+        },
+        usdtMessageText: {
+            flexShrink: 1,
         },
         bubbleInner: {
             padding: 10,

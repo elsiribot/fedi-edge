@@ -25,6 +25,7 @@ const buildJoinedEcash = (): RpcEcashInfo => ({
     federation_type: 'joined',
     federation_id: mockFederation1.id,
     amount: 10000 as MSats,
+    unit: 'bitcoin',
 })
 
 describe('common/hooks/pay', () => {
