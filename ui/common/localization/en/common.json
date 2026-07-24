@@ -1560,7 +1560,12 @@
             "withdrawal-signing": "Guardians are signing the transaction…",
             "withdrawal-submitted": "Submitted to the network…",
             "withdrawal-confirmed": "Withdrawal confirmed",
-            "withdrawal-failed": "Withdrawal failed: {{reason}}"
+            "withdrawal-failed": "Withdrawal failed: {{reason}}",
+            "send-ecash-offline": "Send ecash offline",
+            "deposit": "Deposit",
+            "withdrawal": "Withdrawal",
+            "ecash-sent": "Ecash sent",
+            "ecash-received": "Ecash received"
         },
         "updates": {
             "new-app-version": "New App Version",

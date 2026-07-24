@@ -249,11 +249,8 @@ const ConfirmSendChatPaymentUsdt: React.FC<{
             <Column style={style.content} fullWidth align="center" grow>
                 <Column style={style.amountContainer} align="center" fullWidth>
                     <Row center gap="xs">
-                        <SvgImage
-                            name="UsdCircleFilled"
-                            size={16}
-                            color={theme.colors.moneyGreen}
-                        />
+                        {/* Official Tether mark carries its own colors, no tint */}
+                        <SvgImage name="UsdtCircle" size={16} />
                         <Text bold caption>
                             {t('feature.usdt.usdt-balance')}
                         </Text>

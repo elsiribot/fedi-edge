@@ -14,6 +14,7 @@ import { makeLog } from '@fedi/common/utils/log'
 import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import HoloCircle from '../components/ui/HoloCircle'
+import SvgImage from '../components/ui/SvgImage'
 import { useAppSelector } from '../state/hooks'
 import { resetToWallets } from '../state/navigation'
 import type { RootStackParamList } from '../types/navigation'
@@ -100,6 +101,8 @@ const UsdtWithdrawInitiated: React.FC<Props> = ({ route, navigation }) => {
                 <HoloCircle
                     content={
                         <View style={style.holoContentContainer}>
+                            {/* Official Tether mark carries its own colors, no tint */}
+                            <SvgImage name="UsdtCircle" size={32} />
                             <Text medium style={style.holoText}>
                                 {t('feature.usdt.withdrawal-initiated')}
                             </Text>

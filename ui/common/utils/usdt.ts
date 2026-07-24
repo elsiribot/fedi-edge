@@ -73,3 +73,28 @@ export function parseUsdtInput(input: string): number | null {
 export function isValidEvmAddress(address: string): boolean {
     return /^0x[0-9a-fA-F]{40}$/.test(address)
 }
+
+/**
+ * Parses scanned/pasted input into a USDT recipient (EVM) address.
+ *
+ * Accepts:
+ * - Raw `0x…` (40 hex chars) addresses
+ * - `ethereum:0x…` URIs, with an optional `@chainId` suffix, EIP-681
+ *   function name (e.g. `/transfer`) and/or `?param=…` query string.
+ *   Any EIP-681 amount parameters (`value` / `uint256`) are deliberately
+ *   ignored — the user always enters the amount themselves.
+ *
+ * Returns the bare `0x…` address, or `null` if the input does not
+ * contain a valid EVM address.
+ */
+export function parseUsdtRecipientInput(input: string): string | null {
+    let candidate = input.trim()
+
+    const uriMatch = candidate.match(/^ethereum:(.+)$/i)
+    if (uriMatch) {
+        // Strip optional query params, EIP-681 function name and chain id
+        candidate = uriMatch[1].split('?')[0].split('/')[0].split('@')[0]
+    }
+
+    return isValidEvmAddress(candidate) ? candidate : null
+}

@@ -57,7 +57,7 @@ use rpc_types::sp_transfer::{RpcAccountId, RpcSpTransferState, SpMatrixTransferI
 use rpc_types::spv2_transfer_meta::Spv2TransferTxMeta;
 use rpc_types::usdt::{
     RpcUsdtAmount, RpcUsdtDepositStatus, RpcUsdtGenerateEcashResponse, RpcUsdtStatus,
-    RpcUsdtWithdrawalStatus,
+    RpcUsdtTransaction, RpcUsdtWithdrawalStatus,
 };
 use rpc_types::{
     FrontendMetadata, GuardianStatus, NetworkError, RpcAmount, RpcAppFlavor, RpcEcashInfo,
@@ -1193,6 +1193,14 @@ async fn usdtReceiveEcash(
     ecash: String,
 ) -> anyhow::Result<RpcUsdtAmount> {
     federation.usdt_receive_ecash(ecash).await
+}
+
+#[macro_rules_derive(federation_rpc_method!)]
+async fn usdtListTransactions(
+    federation: Arc<FederationV2>,
+    limit: u32,
+) -> anyhow::Result<Vec<RpcUsdtTransaction>> {
+    federation.usdt_list_transactions(limit as usize).await
 }
 
 #[macro_rules_derive(federation_rpc_method!)]
@@ -2808,6 +2816,7 @@ rpc_methods!(RpcMethods {
     usdtWithdrawalStatus,
     usdtGenerateEcash,
     usdtReceiveEcash,
+    usdtListTransactions,
     // Developer
     getSensitiveLog,
     setSensitiveLog,

@@ -57,11 +57,8 @@ const ChatWalletUsdt: React.FC<{
             <Column grow gap="lg" style={style.container}>
                 <FederationWalletSelector fullWidth />
                 <Row gap="xs" center>
-                    <SvgImage
-                        name="UsdCircleFilled"
-                        size={16}
-                        color={theme.colors.moneyGreen}
-                    />
+                    {/* Official Tether mark carries its own colors, no tint */}
+                    <SvgImage name="UsdtCircle" size={16} />
                     <Text bold caption>
                         {t('words.ecash')}
                     </Text>

@@ -38,6 +38,7 @@ import UnlockAppLockScreenHeader from '../components/feature/pin/UnlockAppLockSc
 import ReceiveBitcoinHeader from '../components/feature/receive/ReceiveBitcoinHeader'
 import ReceiveBitcoinOfflineHeader from '../components/feature/receive/ReceiveBitcoinOfflineHeader'
 import ReceiveCashuHeader from '../components/feature/receive/ReceiveCashuHeader'
+import UsdtReceiveHeader from '../components/feature/receive/UsdtReceiveHeader'
 import ChooseRecoveryMethodHeader from '../components/feature/recovery/ChooseRecoveryMethodHeader'
 import PersonalRecoveryHeader from '../components/feature/recovery/PersonalRecoveryHeader'
 import RecoveryAssistHeader from '../components/feature/recovery/RecoveryAssistHeader'
@@ -182,15 +183,19 @@ import StabilityHistory from './StabilityHistory'
 import StabilityReceive from './StabilityReceive'
 import StabilitySend from './StabilitySend'
 import StabilityWithdrawInitiated from './StabilityWithdrawInitiated'
-import UsdtReceive from './UsdtReceive'
-import UsdtSend from './UsdtSend'
-import UsdtWithdrawInitiated from './UsdtWithdrawInitiated'
 import StartRecoveryAssist from './StartRecoveryAssist'
 import StartSocialBackup from './StartSocialBackup'
 import TabsNavigator from './TabsNavigator'
 import Transactions from './Transactions'
 import UpdateApp from './UpdateApp'
 import UploadAvatarImage from './UploadAvatarImage'
+import UsdtHistory from './UsdtHistory'
+import UsdtReceive from './UsdtReceive'
+import UsdtSend from './UsdtSend'
+import UsdtSendAmount from './UsdtSendAmount'
+import UsdtSendOfflineAmount from './UsdtSendOfflineAmount'
+import UsdtSendOfflineQr from './UsdtSendOfflineQr'
+import UsdtWithdrawInitiated from './UsdtWithdrawInitiated'
 
 const Stack = createNativeStackNavigator<RootStackParamList>()
 
@@ -1305,14 +1310,7 @@ export const MainNavigator = () => {
                                 name="UsdtReceive"
                                 component={UsdtReceive}
                                 options={() => ({
-                                    header: () => (
-                                        <CenteredHeader
-                                            backButton
-                                            title={t(
-                                                'feature.usdt.receive-usdt',
-                                            )}
-                                        />
-                                    ),
+                                    header: () => <UsdtReceiveHeader />,
                                 })}
                             />
                             <Stack.Screen
@@ -1323,6 +1321,58 @@ export const MainNavigator = () => {
                                         <CenteredHeader
                                             backButton
                                             title={t('feature.usdt.send-usdt')}
+                                        />
+                                    ),
+                                })}
+                            />
+                            <Stack.Screen
+                                name="UsdtSendAmount"
+                                component={UsdtSendAmount}
+                                options={() => ({
+                                    header: () => (
+                                        <CenteredHeader
+                                            backButton
+                                            title={t('feature.usdt.send-usdt')}
+                                        />
+                                    ),
+                                })}
+                            />
+                            <Stack.Screen
+                                name="UsdtSendOfflineAmount"
+                                component={UsdtSendOfflineAmount}
+                                options={() => ({
+                                    header: () => (
+                                        <CenteredHeader
+                                            backButton
+                                            title={t(
+                                                'feature.usdt.send-ecash-offline',
+                                            )}
+                                        />
+                                    ),
+                                })}
+                            />
+                            <Stack.Screen
+                                name="UsdtSendOfflineQr"
+                                component={UsdtSendOfflineQr}
+                                options={() => ({
+                                    header: () => (
+                                        <CenteredHeader
+                                            backButton
+                                            title={t(
+                                                'feature.usdt.send-ecash-offline',
+                                            )}
+                                        />
+                                    ),
+                                })}
+                            />
+                            <Stack.Screen
+                                name="UsdtHistory"
+                                component={UsdtHistory}
+                                options={() => ({
+                                    header: () => (
+                                        <CenteredHeader
+                                            backButton
+                                            title={`${t('feature.usdt.usdt-balance')} ${t('words.history')}`}
                                         />
                                     ),
                                 })}

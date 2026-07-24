@@ -282,6 +282,10 @@ export type RootStackParamList = {
     Transactions: { federationId: Federation['id'] }
     UsdtReceive: undefined
     UsdtSend: undefined
+    UsdtSendAmount: { recipient: string }
+    UsdtSendOfflineAmount: undefined
+    UsdtSendOfflineQr: { ecash: string; amountMicros: number }
+    UsdtHistory: { federationId: Federation['id'] }
     UsdtWithdrawInitiated: {
         txid: string
         amountMicros: number

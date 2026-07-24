@@ -176,11 +176,10 @@ const ChatPaymentEvent: React.FC<Props> = ({ event }: Props) => {
                 <Column gap="lg">
                     {isUsdt ? (
                         <Row align="center" gap="xs">
-                            <SvgImage
-                                name="UsdCircleFilled"
-                                size={16}
-                                color={theme.colors.secondary}
-                            />
+                            {/* Official Tether mark carries its own colors,
+                                no tint. Its white ₮ keeps contrast against
+                                the moneyGreen bubble background. */}
+                            <SvgImage name="UsdtCircle" size={16} />
                             <Text
                                 color={theme.colors.secondary}
                                 style={style.usdtMessageText}>

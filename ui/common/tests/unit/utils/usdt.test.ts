@@ -2,6 +2,7 @@ import {
     formatUsdtMicros,
     isValidEvmAddress,
     parseUsdtInput,
+    parseUsdtRecipientInput,
     USDT_MICROS_PER_USDT,
 } from '../../../utils/usdt'
 
@@ -85,6 +86,41 @@ describe('usdt utils', () => {
             expect(
                 isValidEvmAddress('0xZZC17F958D2ee523a2206206994597C13D831ec7'),
             ).toBe(false)
+        })
+    })
+
+    describe('parseUsdtRecipientInput', () => {
+        const address = '0xdAC17F958D2ee523a2206206994597C13D831ec7'
+
+        it('accepts raw 0x addresses', () => {
+            expect(parseUsdtRecipientInput(address)).toBe(address)
+            expect(parseUsdtRecipientInput(`  ${address}  `)).toBe(address)
+        })
+
+        it('accepts ethereum: URIs', () => {
+            expect(parseUsdtRecipientInput(`ethereum:${address}`)).toBe(address)
+            expect(parseUsdtRecipientInput(`ETHEREUM:${address}`)).toBe(address)
+        })
+
+        it('strips chain ids and query params, ignoring EIP-681 amounts', () => {
+            expect(parseUsdtRecipientInput(`ethereum:${address}@1`)).toBe(
+                address,
+            )
+            expect(
+                parseUsdtRecipientInput(`ethereum:${address}?value=1000000`),
+            ).toBe(address)
+            expect(
+                parseUsdtRecipientInput(
+                    `ethereum:${address}@1/transfer?uint256=1000000`,
+                ),
+            ).toBe(address)
+        })
+
+        it('rejects invalid input', () => {
+            expect(parseUsdtRecipientInput('')).toBeNull()
+            expect(parseUsdtRecipientInput('0x1234')).toBeNull()
+            expect(parseUsdtRecipientInput('ethereum:0x1234')).toBeNull()
+            expect(parseUsdtRecipientInput('bitcoin:bc1qxyz')).toBeNull()
         })
     })
 })

@@ -56,6 +56,36 @@ pub struct RpcUsdtGenerateEcashResponse {
     pub operation_id: crate::RpcOperationId,
 }
 
+/// One entry of the USDT transaction history, derived from the client
+/// operation log (mirroring the usdt-demo-wallet's history feed).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RpcUsdtTransaction {
+    /// Unix seconds
+    #[ts(type = "number")]
+    pub created_at: u64,
+    pub amount: RpcUsdtAmount,
+    pub incoming: bool,
+    pub kind: RpcUsdtTransactionKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[ts(export)]
+pub enum RpcUsdtTransactionKind {
+    /// On-chain deposit claimed into e-cash; `address` is the deposit account
+    #[serde(rename_all = "camelCase")]
+    Deposit { address: String },
+    /// On-chain withdrawal; `recipient` is the destination address
+    #[serde(rename_all = "camelCase")]
+    Withdrawal { recipient: String },
+    /// USDT e-cash sent (e.g. in chat)
+    EcashSend,
+    /// USDT e-cash received (claimed notes / chat payment)
+    EcashReceive,
+}
+
 /// Federation-side USDT module readiness (whether new deposit addresses can
 /// be handed out).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

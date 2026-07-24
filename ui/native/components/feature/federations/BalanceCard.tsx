@@ -52,8 +52,10 @@ export default function WalletBalanceCard({
 
     const onPressTransactions = () => {
         if (recoveryInProgress) return
-        // There is no transaction history screen for USDT yet
-        if (paymentType === 'usdt') return
+        if (paymentType === 'usdt') {
+            navigation.navigate('UsdtHistory', { federationId })
+            return
+        }
         navigation.navigate(
             paymentType === 'bitcoin' ? 'Transactions' : 'StabilityHistory',
             { federationId },
@@ -61,7 +63,8 @@ export default function WalletBalanceCard({
     }
 
     let iconName: SvgImageName = 'BitcoinCircle'
-    let iconColor = theme.colors.orange
+    // The Tether logo carries its own colors, so leave it untinted
+    let iconColor: string | undefined = theme.colors.orange
     let headerTitle = t('words.bitcoin')
     let primaryAmount = formattedBalanceFiat
     let secondaryAmount: string | null = formattedBalanceSats
@@ -76,8 +79,8 @@ export default function WalletBalanceCard({
                 ? `${formattedStableBalancePending} ${t('words.pending')}`
                 : null
     } else if (paymentType === 'usdt') {
-        iconName = 'UsdCircleFilled'
-        iconColor = theme.colors.moneyGreen
+        iconName = 'UsdtCircle'
+        iconColor = undefined
         headerTitle = t('feature.usdt.usdt-balance')
         primaryAmount = formatUsdtMicros(usdtBalanceMicros)
         secondaryAmount = null
@@ -100,7 +103,7 @@ export default function WalletBalanceCard({
                 <SvgImage
                     name="TxnHistory"
                     color={
-                        recoveryInProgress || paymentType === 'usdt'
+                        recoveryInProgress
                             ? theme.colors.lightGrey
                             : theme.colors.primary
                     }

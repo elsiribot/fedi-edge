@@ -989,6 +989,7 @@ export type RpcMethods = {
     usdtWithdrawalStatus: [usdtWithdrawalStatus, RpcUsdtWithdrawalStatus]
     usdtGenerateEcash: [usdtGenerateEcash, RpcUsdtGenerateEcashResponse]
     usdtReceiveEcash: [usdtReceiveEcash, RpcUsdtAmount]
+    usdtListTransactions: [usdtListTransactions, Array<RpcUsdtTransaction>]
     getSensitiveLog: [getSensitiveLog, boolean]
     setSensitiveLog: [setSensitiveLog, null]
     internalMarkBridgeExport: [internalMarkBridgeExport, null]
@@ -1840,6 +1841,26 @@ export type RpcUsdtStatus = {
     healthyGuardians: number
     threshold: number
 }
+
+/**
+ * One entry of the USDT transaction history, derived from the client
+ * operation log (mirroring the usdt-demo-wallet's history feed).
+ */
+export type RpcUsdtTransaction = {
+    /**
+     * Unix seconds
+     */
+    createdAt: number
+    amount: RpcUsdtAmount
+    incoming: boolean
+    kind: RpcUsdtTransactionKind
+}
+
+export type RpcUsdtTransactionKind =
+    | { type: 'deposit'; address: string }
+    | { type: 'withdrawal'; recipient: string }
+    | { type: 'ecashSend' }
+    | { type: 'ecashReceive' }
 
 /**
  * Status of a USDT withdrawal, identified by the txid returned from
@@ -2845,6 +2866,11 @@ export type usdtGenerateEcash = {
 }
 
 export type usdtListDeposits = { federationId: RpcFederationId }
+
+export type usdtListTransactions = {
+    federationId: RpcFederationId
+    limit: number
+}
 
 export type usdtReceiveEcash = { federationId: RpcFederationId; ecash: string }
 

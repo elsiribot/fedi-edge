@@ -17,7 +17,9 @@ use fedimint_core::task::sleep;
 use fedimint_core::{OutPoint, TransactionId};
 use fedimint_mintv2_client::{
     ECash as MintV2ECash, FinalReceiveOperationState as MintV2FinalReceiveOperationState,
+    MintOperationMeta as MintV2OperationMeta,
 };
+use fedimint_usdt_client::UsdtOperationMeta;
 use fedimint_usdt_client::db::{ClaimKeyKey, ClaimKeyPrefixAll};
 use fedimint_usdt_common::{BootstrapState, EvmAddress, USDT_UNIT, UsdtAmount, WithdrawalStatus};
 use futures::StreamExt;
@@ -25,8 +27,9 @@ use rpc_types::error::ErrorCode;
 use rpc_types::event::{Event, UsdtDepositEvent, UsdtDepositState, UsdtWithdrawalEvent};
 use rpc_types::usdt::{
     RpcUsdtAmount, RpcUsdtDepositStatus, RpcUsdtGenerateEcashResponse, RpcUsdtStatus,
-    RpcUsdtWithdrawalStatus,
+    RpcUsdtTransaction, RpcUsdtTransactionKind, RpcUsdtWithdrawalStatus,
 };
+use runtime::utils::to_unix_time;
 use rpc_types::{
     EcashReceiveMetadata, EcashReceiveReason, EcashSendMetadata, FrontendMetadata, RpcAmount,
 };
@@ -308,6 +311,85 @@ impl FederationV2 {
         }
     }
 
+    /// USDT transaction history from the operation log: on-chain deposits
+    /// (usdt module claims) and withdrawals, plus USDT e-cash sends/receives
+    /// (USDT-denominated mintv2 operations). Newest first.
+    pub async fn usdt_list_transactions(&self, limit: usize) -> Result<Vec<RpcUsdtTransaction>> {
+        let include_mintv2 = self
+            .client
+            .mintv2()
+            .map(|m| m.amount_unit() == USDT_UNIT)
+            .unwrap_or(false);
+
+        let entries = self
+            .client
+            .operation_log()
+            .paginate_operations_rev(limit, None)
+            .await;
+
+        let mut transactions = Vec::new();
+        for (op_key, entry) in entries {
+            let Ok(created_at) = to_unix_time(op_key.creation_time) else {
+                continue;
+            };
+            let tx = match entry.operation_module_kind() {
+                "usdt" => match entry.try_meta::<UsdtOperationMeta>() {
+                    Ok(UsdtOperationMeta::Claim {
+                        account,
+                        amount,
+                        fee,
+                    }) => Some(RpcUsdtTransaction {
+                        created_at,
+                        // the e-cash actually issued is amount - fee
+                        amount: RpcUsdtAmount(amount.0.saturating_sub(fee.0)),
+                        incoming: true,
+                        kind: RpcUsdtTransactionKind::Deposit {
+                            address: account.to_string(),
+                        },
+                    }),
+                    Ok(UsdtOperationMeta::Withdraw {
+                        recipient, amount, ..
+                    }) => Some(RpcUsdtTransaction {
+                        created_at,
+                        amount: RpcUsdtAmount(amount.0),
+                        incoming: false,
+                        kind: RpcUsdtTransactionKind::Withdrawal {
+                            recipient: recipient.to_string(),
+                        },
+                    }),
+                    Err(_) => None,
+                },
+                "mintv2" if include_mintv2 => {
+                    match entry.try_meta::<MintV2OperationMeta>() {
+                        Ok(MintV2OperationMeta::Send { ecash, .. }) => {
+                            usdt_ecash_amount(&ecash).map(|amount| RpcUsdtTransaction {
+                                created_at,
+                                amount,
+                                incoming: false,
+                                kind: RpcUsdtTransactionKind::EcashSend,
+                            })
+                        }
+                        Ok(MintV2OperationMeta::Receive { ecash, .. }) => {
+                            usdt_ecash_amount(&ecash).map(|amount| RpcUsdtTransaction {
+                                created_at,
+                                amount,
+                                incoming: true,
+                                kind: RpcUsdtTransactionKind::EcashReceive,
+                            })
+                        }
+                        // reissues are internal bookkeeping, not user payments
+                        Ok(MintV2OperationMeta::Reissue { .. }) | Err(_) => None,
+                    }
+                }
+                _ => None,
+            };
+            if let Some(tx) = tx {
+                transactions.push(tx);
+            }
+        }
+        Ok(transactions)
+    }
+
     /// Startup pass: claim anything already claimable for our known deposit
     /// addresses (covers deposits that landed while the app was closed).
     pub(super) fn spawn_usdt_startup_claimer(&self) {
@@ -450,4 +532,11 @@ fn convert_withdrawal_status(status: WithdrawalStatus) -> RpcUsdtWithdrawalStatu
 
 fn variant_eq(a: &RpcUsdtWithdrawalStatus, b: &RpcUsdtWithdrawalStatus) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
+}
+
+/// Decode the raw USDT amount carried inside a mintv2 e-cash string.
+fn usdt_ecash_amount(ecash: &str) -> Option<RpcUsdtAmount> {
+    decode_prefixed::<MintV2ECash>(FEDIMINT_PREFIX, ecash)
+        .ok()
+        .map(|e| RpcUsdtAmount(e.amount().msats))
 }

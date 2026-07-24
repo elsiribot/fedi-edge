@@ -72,7 +72,7 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
     // mintv2 notes may be denominated in a non-Bitcoin unit (e.g. USDT)
     const formatEcashAmount = (info: RpcEcashInfo) =>
         info.federation_type === 'joined' && info.unit === 'usdt'
-            ? `${formatUsdtMicros(info.amount)} USDT`
+            ? formatUsdtMicros(info.amount)
             : `${amountUtils.msatToSatString(info.amount)} SATS`
 
     const style = styles(theme)
@@ -131,9 +131,7 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
         content = (
             <>
                 <SvgImage name="AlertWarningTriangle" size={48} />
-                <Text h2>
-                    {formatEcashAmount(parsedEcash)}
-                </Text>
+                <Text h2>{formatEcashAmount(parsedEcash)}</Text>
                 <Text center>
                     {t('feature.ecash.claim-ecash-new-members-disabled')}
                 </Text>
@@ -150,9 +148,7 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
         content = (
             <>
                 <SvgImage name="Cash" size={48} />
-                <Text h2>
-                    {formatEcashAmount(parsedEcash)}
-                </Text>
+                <Text h2>{formatEcashAmount(parsedEcash)}</Text>
                 <Text center>{t('feature.ecash.claim-ecash-description')}</Text>
             </>
         )

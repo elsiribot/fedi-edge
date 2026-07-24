@@ -36,6 +36,9 @@ const log = makeLog('common/utils/fedimint')
 
 export type UnsubscribeFn = () => void
 
+/** Re-exported for consumers that take USDT history entries as props. */
+export type RpcUsdtTransaction = bindings.RpcUsdtTransaction
+
 type ExtractStreamData<Method extends keyof bindings.RpcMethods> =
     bindings.RpcPayload<Method> extends {
         streamId: bindings.RpcStreamId<infer T>
@@ -402,6 +405,10 @@ export class FedimintBridge {
 
     async usdtReceiveEcash(federationId: string, ecash: string) {
         return this.rpcTyped('usdtReceiveEcash', { federationId, ecash })
+    }
+
+    async usdtListTransactions(federationId: string, limit: number) {
+        return this.rpcTyped('usdtListTransactions', { federationId, limit })
     }
 
     async listTransactions(

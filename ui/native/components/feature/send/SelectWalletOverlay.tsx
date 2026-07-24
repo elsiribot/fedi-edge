@@ -206,10 +206,8 @@ function BalanceItem({
                 containerStyle={style.balanceItem}
                 onPress={onPress}
                 testID={`UsdtBalanceButton-${federation.id}`}>
-                <SvgImage
-                    name="UsdCircleFilled"
-                    color={theme.colors.moneyGreen}
-                />
+                {/* Official Tether mark carries its own colors, no tint */}
+                <SvgImage name="UsdtCircle" />
                 <Text style={style.label} numberOfLines={1}>
                     {t('feature.usdt.usdt-balance')}
                 </Text>
