@@ -29,11 +29,13 @@ pub struct WalletOpsV2;
 // parity with the lnv2/mintv2 custom metadata APIs.
 #[apply(async_trait_maybe_send!)]
 impl WalletOps for WalletOpsV2 {
-    fn get_network(&self, fed: &FederationV2) -> Network {
-        fed.client
-            .walletv2()
-            .expect("walletv2 selected in FederationV2::new")
-            .get_network()
+    fn get_network(&self, fed: &FederationV2) -> Option<Network> {
+        Some(
+            fed.client
+                .walletv2()
+                .expect("walletv2 selected in FederationV2::new")
+                .get_network(),
+        )
     }
 
     async fn supports_safe_deposit(&self, _fed: &FederationV2) -> Result<bool> {

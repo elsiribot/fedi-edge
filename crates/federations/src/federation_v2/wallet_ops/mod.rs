@@ -17,7 +17,9 @@ use super::{FederationTransactionParts, FederationV2};
 #[apply(async_trait_maybe_send!)]
 pub trait WalletOps: MaybeSend + MaybeSync {
     /// Get the bitcoin network type this federation's wallet module is using
-    fn get_network(&self, fed: &FederationV2) -> Network;
+    /// `None` if the federation runs no on-chain wallet module at all
+    /// (e.g. a USDT-only federation).
+    fn get_network(&self, fed: &FederationV2) -> Option<Network>;
 
     /// Whether this federation supports the safe on-chain deposit flow, which
     /// is what gates offering an on-chain receive address in the app. Fallible

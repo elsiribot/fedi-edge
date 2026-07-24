@@ -106,11 +106,11 @@ impl WalletOpsV1 {
 
 #[apply(async_trait_maybe_send!)]
 impl WalletOps for WalletOpsV1 {
-    fn get_network(&self, fed: &FederationV2) -> Network {
-        fed.client
-            .wallet()
-            .expect("wallet selected in FederationV2::new")
-            .get_network()
+    fn get_network(&self, fed: &FederationV2) -> Option<Network> {
+        // v1 wallet ops are also the fallback for federations with no wallet
+        // module at all (e.g. USDT-only federations), so the module may
+        // legitimately be missing.
+        Some(fed.client.wallet().ok()?.get_network())
     }
 
     async fn supports_safe_deposit(&self, fed: &FederationV2) -> Result<bool> {
