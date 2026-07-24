@@ -46,6 +46,7 @@ mod matrix;
 mod multispend_tests;
 mod nostr_tests;
 mod sp_transfer_tests;
+mod usdt_tests;
 mod utils;
 
 // nosemgrep: ban-wildcard-imports
