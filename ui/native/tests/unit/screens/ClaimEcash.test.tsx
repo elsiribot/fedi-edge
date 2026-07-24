@@ -35,6 +35,7 @@ describe('/screens/ClaimEcash', () => {
                 amount: 10000 as MSats,
                 federation_id: '1',
                 federation_type: 'joined',
+                unit: 'bitcoin',
             },
             ecashToken: '123',
             isError: false,

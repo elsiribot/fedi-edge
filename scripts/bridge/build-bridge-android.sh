@@ -7,8 +7,9 @@ source "$REPO_ROOT/scripts/common.sh"
 
 export BUILD_ALL_BRIDGE_TARGETS=${BUILD_ALL_BRIDGE_TARGETS:-0}
 
-# only build emulator target by default
-export BRIDGE_TARGETS_TO_BUILD=("aarch64-linux-android")
+# only build emulator target by default; override with e.g.
+# BRIDGE_TARGET=x86_64-linux-android for an x86_64 emulator
+export BRIDGE_TARGETS_TO_BUILD=("${BRIDGE_TARGET:-aarch64-linux-android}")
 
 if [ "$BUILD_ALL_BRIDGE_TARGETS" == "1" ]; then
   export BRIDGE_TARGETS_TO_BUILD=("aarch64-linux-android" "x86_64-linux-android" "armv7-linux-androideabi")

@@ -41,6 +41,19 @@ impl FederationV2 {
         self.client.usdt().is_ok()
     }
 
+    /// The unit this federation's mintv2 instance denominates e-cash in,
+    /// `None` if the federation has no mintv2 module.
+    pub fn ecash_unit(&self) -> Option<rpc_types::RpcEcashUnit> {
+        let unit = self.client.mintv2().ok()?.amount_unit();
+        Some(if unit == fedimint_core::module::AmountUnit::BITCOIN {
+            rpc_types::RpcEcashUnit::Bitcoin
+        } else if unit == USDT_UNIT {
+            rpc_types::RpcEcashUnit::Usdt
+        } else {
+            rpc_types::RpcEcashUnit::Other
+        })
+    }
+
     /// USDT e-cash balance in 10^-6 USDT units.
     pub async fn usdt_balance(&self) -> Result<RpcUsdtAmount> {
         if self.recovering() {

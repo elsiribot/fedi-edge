@@ -7,8 +7,10 @@ import Hyperlink from 'react-native-hyperlink'
 
 import { useParseEcash, useClaimEcash } from '@fedi/common/hooks/pay'
 import { useToast } from '@fedi/common/hooks/toast'
+import { RpcEcashInfo } from '@fedi/common/types/bindings'
 import amountUtils from '@fedi/common/utils/AmountUtils'
 import { getFederationTosUrl } from '@fedi/common/utils/FederationUtils'
+import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import { FederationLogo } from '../components/feature/federations/FederationLogo'
 import { Row, Column } from '../components/ui/Flex'
@@ -67,6 +69,12 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
     let content: React.ReactElement | null = null
     let actions: React.ReactElement | null = null
 
+    // mintv2 notes may be denominated in a non-Bitcoin unit (e.g. USDT)
+    const formatEcashAmount = (info: RpcEcashInfo) =>
+        info.federation_type === 'joined' && info.unit === 'usdt'
+            ? `${formatUsdtMicros(info.amount)} USDT`
+            : `${amountUtils.msatToSatString(info.amount)} SATS`
+
     const style = styles(theme)
 
     if (validating) {
@@ -124,7 +132,7 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
             <>
                 <SvgImage name="AlertWarningTriangle" size={48} />
                 <Text h2>
-                    {amountUtils.msatToSatString(parsedEcash.amount)} SATS
+                    {formatEcashAmount(parsedEcash)}
                 </Text>
                 <Text center>
                     {t('feature.ecash.claim-ecash-new-members-disabled')}
@@ -143,7 +151,7 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
             <>
                 <SvgImage name="Cash" size={48} />
                 <Text h2>
-                    {amountUtils.msatToSatString(parsedEcash.amount)} SATS
+                    {formatEcashAmount(parsedEcash)}
                 </Text>
                 <Text center>{t('feature.ecash.claim-ecash-description')}</Text>
             </>

@@ -274,9 +274,18 @@ impl Federations {
             if let Some(federation_id) = v2_ecash.mint() {
                 let federation_id = federation_id.to_string();
                 if self.get_federations_map().contains_key(&federation_id) {
+                    // mintv2 notes don't encode their unit; it is a property
+                    // of the joined federation's mint instance (e.g. USDT
+                    // for the usdt module's USDT-denominated mintv2).
+                    let unit = self
+                        .get_federation(&federation_id)
+                        .ok()
+                        .and_then(|fed| fed.ecash_unit())
+                        .unwrap_or_default();
                     return Ok(RpcEcashInfo::Joined {
                         federation_id: RpcFederationId(federation_id),
                         amount,
+                        unit,
                     });
                 }
             }
@@ -292,6 +301,7 @@ impl Federations {
             Some(id) => Ok(RpcEcashInfo::Joined {
                 federation_id: RpcFederationId(id),
                 amount: RpcAmount(oob.total_amount()),
+                unit: rpc_types::RpcEcashUnit::Bitcoin,
             }),
             None => Ok(RpcEcashInfo::NotJoined {
                 federation_invite: oob.federation_invite().map(|invite| invite.to_string()),

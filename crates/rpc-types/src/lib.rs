@@ -280,6 +280,18 @@ impl From<fedimint_core::core::OperationId> for RpcOperationId {
     }
 }
 
+/// Which asset an amount is denominated in. `Usdt` amounts are in 10^-6
+/// USDT units (the raw value is carried in the msat field of `RpcAmount`).
+#[derive(Debug, Serialize, Deserialize, TS, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum RpcEcashUnit {
+    #[default]
+    Bitcoin,
+    Usdt,
+    Other,
+}
+
 #[derive(Debug, Serialize, Deserialize, TS, Clone)]
 #[serde(rename_all = "camelCase")]
 #[serde(tag = "federation_type")]
@@ -288,6 +300,8 @@ pub enum RpcEcashInfo {
     Joined {
         federation_id: RpcFederationId,
         amount: RpcAmount,
+        /// Unit the joined federation's mint denominates these notes in
+        unit: RpcEcashUnit,
     },
     NotJoined {
         federation_invite: Option<String>,

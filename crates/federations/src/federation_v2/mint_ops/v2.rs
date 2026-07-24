@@ -29,6 +29,12 @@ impl MintOps for MintOpsV2 {
             .client
             .mintv2()
             .expect("mintv2 selected in FederationV2::new");
+        // A non-Bitcoin-denominated instance (e.g. the usdt module's USDT
+        // mint) is not part of the Bitcoin balance; its notes are surfaced
+        // through the dedicated account (usdtBalance) instead.
+        if mintv2.amount_unit() != fedimint_core::module::AmountUnit::BITCOIN {
+            return Amount::ZERO;
+        }
         mintv2
             .get_count_by_denomination()
             .await
