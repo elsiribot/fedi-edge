@@ -1180,10 +1180,11 @@ async fn usdtWithdrawalStatus(
 async fn usdtGenerateEcash(
     federation: Arc<FederationV2>,
     amount: RpcUsdtAmount,
+    include_invite: bool,
     frontend_metadata: FrontendMetadata,
 ) -> anyhow::Result<RpcUsdtGenerateEcashResponse> {
     federation
-        .usdt_generate_ecash(amount, frontend_metadata)
+        .usdt_generate_ecash(amount, include_invite, frontend_metadata)
         .await
 }
 

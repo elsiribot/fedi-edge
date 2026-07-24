@@ -11,6 +11,7 @@ import {
     selectPaymentFederation,
     selectUsdtBalanceMicros,
 } from '@fedi/common/redux'
+import { shouldShowInviteCode } from '@fedi/common/utils/FederationUtils'
 import { hexToRgba } from '@fedi/common/utils/color'
 import { formatUsdtMicros, parseUsdtInput } from '@fedi/common/utils/usdt'
 
@@ -60,6 +61,9 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
             const { ecash } = await fedimint.usdtGenerateEcash(
                 federationId,
                 amountMicros,
+                // embed an invite so non-members can join-then-claim,
+                // unless the federation opted out
+                federation?.meta ? shouldShowInviteCode(federation.meta) : false,
             )
             dispatch(refreshUsdtBalance({ fedimint, federationId }))
             navigation.replace('UsdtSendOfflineQr', {

@@ -254,6 +254,7 @@ impl FederationV2 {
     pub async fn usdt_generate_ecash(
         &self,
         amount: RpcUsdtAmount,
+        include_invite: bool,
         frontend_meta: FrontendMetadata,
     ) -> Result<RpcUsdtGenerateEcashResponse> {
         let _guard = self.generate_ecash_lock.lock().await;
@@ -273,10 +274,17 @@ impl FederationV2 {
             internal: false,
             frontend_metadata: Some(frontend_meta),
         })?;
-        let (operation_id, ecash) = mintv2
+        let (operation_id, mut ecash) = mintv2
             .send(fedimint_core::Amount::from_msats(amount.0), custom_meta)
             .await?;
         drop(spend_guard);
+        // Embed a federation invite so non-member recipients can
+        // join-then-claim (skipped gracefully by older clients).
+        if include_invite {
+            if let Ok(invite) = self.get_invite_code().await.parse() {
+                ecash = ecash.with_invite(invite);
+            }
+        }
         let ecash = encode_prefixed(FEDIMINT_PREFIX, &ecash);
         Ok(RpcUsdtGenerateEcashResponse {
             ecash,

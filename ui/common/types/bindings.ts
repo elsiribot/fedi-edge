@@ -2864,6 +2864,7 @@ export type usdtGenerateDepositAddress = { federationId: RpcFederationId };
 export type usdtGenerateEcash = {
   federationId: RpcFederationId;
   amount: RpcUsdtAmount;
+  includeInvite: boolean;
   frontendMetadata: FrontendMetadata;
 };
 

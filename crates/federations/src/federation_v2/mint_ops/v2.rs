@@ -86,9 +86,6 @@ impl MintOps for MintOpsV2 {
     ) -> Result<RpcGenerateEcashResponse> {
         let _guard = fed.generate_ecash_lock.lock().await;
         let mintv2 = fed.client.mintv2()?;
-        // v2 ecash has no invite-code embedding. "Cancel" is implemented as
-        // receiving the notes back to self, recorded as a separate reclaim tx.
-        let _ = include_invite;
         let fees_by_stream = fed
             .get_fee_amounts_by_stream(
                 fedimint_mint_client::KIND,
@@ -112,8 +109,15 @@ impl MintOps for MintOpsV2 {
             internal: false,
             frontend_metadata: Some(frontend_meta),
         })?;
-        let (operation_id, ecash) = mintv2.send(amount, custom_meta).await?;
+        let (operation_id, mut ecash) = mintv2.send(amount, custom_meta).await?;
         let sent_amount = ecash.amount();
+        // Embed a federation invite so non-member recipients can
+        // join-then-claim (skipped gracefully by older clients).
+        if include_invite {
+            if let Ok(invite) = fed.get_invite_code().await.parse() {
+                ecash = ecash.with_invite(invite);
+            }
+        }
         let ecash = encode_prefixed(FEDIMINT_PREFIX, &ecash);
         let settled_fees_by_stream = fed
             .get_fee_amounts_by_stream(

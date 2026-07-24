@@ -1633,6 +1633,8 @@ export const sendMatrixPaymentPush = createAsyncThunk<
             amount: msats,
             ecash,
             federationId: federation.id,
+            // lets non-member recipients join-then-claim
+            ...(includeInvite ? { inviteCode: federation.inviteCode } : {}),
         })
 
         return senderOperationId
@@ -1722,6 +1724,7 @@ export const sendMatrixUsdtPaymentPush = createAsyncThunk<
         const { ecash, operationId } = await fedimint.usdtGenerateEcash(
             federationId,
             amountMicros,
+            shouldShowInviteCode(federation.meta),
             frontendMetadata,
         )
 
@@ -1740,6 +1743,10 @@ export const sendMatrixUsdtPaymentPush = createAsyncThunk<
             unit: 'usdt',
             ecash,
             federationId: federation.id,
+            // lets non-member recipients join-then-claim
+            ...(shouldShowInviteCode(federation.meta)
+                ? { inviteCode: federation.inviteCode }
+                : {}),
         })
 
         dispatch(refreshUsdtBalance({ fedimint, federationId }))
@@ -2060,6 +2067,7 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
         if (!federationId) throw new Error('Payment missing federationId')
         if (!amount) throw new Error('Payment request missing amount')
 
+        const federation = selectLoadedFederation(getState(), federationId)
         const client = fedimint.getMatrixClient()
 
         const frontendMetadata = {
@@ -2069,12 +2077,17 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
         } satisfies FrontendMetadata
 
         // USDT-denominated requests carry the amount in micros and are
-        // paid with USDT ecash (no Fedi fees, no invite code embedding)
+        // paid with USDT ecash (no Fedi fees). The requester is a room
+        // member but possibly not a federation member yet, so embed an
+        // invite unless the federation opted out.
         if (event.content.unit === 'usdt') {
             const { ecash, operationId: senderOperationId } =
                 await fedimint.usdtGenerateEcash(
                     federationId,
                     amount,
+                    federation?.meta
+                        ? shouldShowInviteCode(federation.meta)
+                        : false,
                     frontendMetadata,
                 )
 

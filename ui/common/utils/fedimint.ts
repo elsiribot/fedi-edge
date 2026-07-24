@@ -390,6 +390,7 @@ export class FedimintBridge {
     async usdtGenerateEcash(
         federationId: string,
         amount: RpcUsdtAmount,
+        includeInvite = false,
         frontendMetadata: FrontendMetadata = {
             initialNotes: null,
             recipientMatrixId: null,
@@ -399,6 +400,7 @@ export class FedimintBridge {
         return this.rpcTyped('usdtGenerateEcash', {
             federationId,
             amount,
+            includeInvite,
             frontendMetadata,
         })
     }
