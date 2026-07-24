@@ -220,13 +220,17 @@ android {
             manifestPlaceholders = [autoVerify: "true"]
         }
         // Isolated dev variant: ./gradlew assembleDevDebug -PdevId=07
-        // Each devId gets its own applicationId (com.fedi.dev07) and app data
+        // Each devId gets its own applicationId (com.fedi.dev07) and app data.
+        // Optional -PdevName="My Fedi" overrides the launcher label.
         dev {
             dimension "env"
             def id = project.hasProperty('devId') ? project.property('devId') : "00"
+            def name = project.hasProperty('devName')
+                ? project.property('devName')
+                : "Fedi dev${id}"
             applicationIdSuffix ".dev${id}"
             manifestPlaceholders = [autoVerify: "false"]
-            resValue "string", "app_name", "Fedi dev${id}"
+            resValue "string", "app_name", name
         }
     }
 }
