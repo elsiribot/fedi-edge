@@ -98,7 +98,15 @@ USDt federations locally.
 - Availability: UI detects kind `"usdt"` in the federation client config (same as
   stability pool detection); no new remote feature flag.
 
-### D5. UI (stability pool design language)
+### D5. UI (stability pool design language, Bitcoin-like payment flows)
+
+**User direction (2026-07-24):** no exchange functionality like the stability
+pool's BTC↔stable conversion flows. USDt is its own asset with Bitcoin-like
+payment UX: the send/receive flows mirror the app's Bitcoin `Send`/
+`ReceiveBitcoin` screens (receive = show on-chain deposit address QR; send =
+enter recipient EVM address + amount, fee quote, confirm). Only the *account
+presentation* (wallet card, switcher entry, account tile in overlays) follows
+the stability pool design language.
 
 - Extend `paymentType` union with `'usdt'` (`common/redux/environment.ts`).
 - `Wallet.tsx`: switcher gains a "USDT" option when the federation has the usdt module;
@@ -107,11 +115,11 @@ USDt federations locally.
 - `BalanceCard.tsx`: third branch — icon `UsdCircleFilled` in Tether teal, title
   "USDT balance" (i18n `feature.usdt.*`), primary amount formatted as USD-style fiat
   from the 10^-6 USDT unit.
-- New screens mirroring stability pool: `UsdtReceive` (on-chain deposit address QR +
-  copy; ecash receive already global), `UsdtSend` (recipient EVM address + amount +
-  fee quote), `UsdtConfirmWithdraw`, `UsdtHistory` (transactions list filtered to USDT
-  unit + usdt operations). Components under
-  `native/components/feature/usdt/` modeled on `stabilitypool/` equivalents.
+- New screens modeled on the Bitcoin flows: `UsdtReceive` (deposit address QR + copy,
+  modeled on `ReceiveBitcoin`), `UsdtSend` (recipient EVM address + amount + fee
+  quote + confirm, modeled on the Bitcoin `Send` flow), `UsdtHistory` (transactions
+  list). No conversion/exchange screens. Account-presentation components under
+  `native/components/feature/usdt/` follow the `stabilitypool/` tile/card patterns.
 - Hooks `common/hooks/usdt.ts` (`useUsdtBalance`, `useUsdtForm`s), redux additions in
   `common/redux/wallet.ts`, module detection `useIsUsdtSupported` in
   `common/hooks/federation.ts`, strings in `common/localization/en/common.json`
