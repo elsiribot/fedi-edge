@@ -230,7 +230,8 @@ android {
                 : "Fedi dev${id}"
             applicationIdSuffix ".dev${id}"
             manifestPlaceholders = [autoVerify: "false"]
-            resValue "string", "app_name", name
+            // apostrophes must be escaped in Android string resources
+            resValue "string", "app_name", name.replace("'", "\\'")
         }
     }
 }
