@@ -3,7 +3,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import { Button, Input, Text, Theme, useTheme } from '@rneui/themed'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Keyboard, ScrollView, StyleSheet } from 'react-native'
+import { StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
@@ -11,6 +11,7 @@ import {
     selectPaymentFederation,
     selectUsdtBalanceMicros,
 } from '@fedi/common/redux'
+import { hexToRgba } from '@fedi/common/utils/color'
 import { makeLog } from '@fedi/common/utils/log'
 import {
     formatUsdtMicros,
@@ -21,6 +22,7 @@ import {
 import { Column, Row } from '../components/ui/Flex'
 import { PressableIcon } from '../components/ui/PressableIcon'
 import { SafeAreaContainer } from '../components/ui/SafeArea'
+import UsdtAmountInput from '../components/ui/UsdtAmountInput'
 import { useAppSelector } from '../state/hooks'
 import type { RootStackParamList } from '../types/navigation'
 
@@ -28,9 +30,14 @@ const log = makeLog('UsdtSendAmount')
 
 export type Props = NativeStackScreenProps<RootStackParamList, 'UsdtSendAmount'>
 
+/** Converts micros to a plain decimal input string, e.g. 1500000 -> "1.50" */
+const microsToAmountInput = (micros: number): string =>
+    formatUsdtMicros(micros, { symbol: false }).replace(/,/g, '')
+
 /**
  * Amount entry + network fee quote step of the USDT send flow. The
  * recipient address arrives from the UsdtSend scanner, but stays editable.
+ * A scanned `?amount=` param prefills the amount, also still editable.
  */
 const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
     const { t } = useTranslation()
@@ -45,13 +52,18 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
     )
 
     const [recipient, setRecipient] = useState(route.params.recipient)
-    const [amountInput, setAmountInput] = useState('')
+    const [amountInput, setAmountInput] = useState(() =>
+        route.params.amountMicros
+            ? microsToAmountInput(route.params.amountMicros)
+            : '',
+    )
     const [feeMicros, setFeeMicros] = useState<number | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
 
     const trimmedRecipient = recipient.trim()
     const isRecipientValid = isValidEvmAddress(trimmedRecipient)
-    const amountMicros = parseUsdtInput(amountInput)
+    // Ignore a transient trailing decimal point mid-entry, e.g. "5."
+    const amountMicros = parseUsdtInput(amountInput.replace(/\.$/, ''))
     const hasInsufficientBalance =
         amountMicros !== null && amountMicros > balanceMicros
     const isAmountValid =
@@ -107,7 +119,6 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
             return
 
         setIsSubmitting(true)
-        Keyboard.dismiss()
         try {
             const txid = await fedimint.usdtWithdraw(
                 federationId,
@@ -115,10 +126,18 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
                 amountMicros,
                 feeMicros,
             )
-            navigation.replace('UsdtWithdrawInitiated', {
-                txid,
-                amountMicros,
-                recipient: trimmedRecipient,
+            navigation.replace('SendSuccessShield', {
+                title: t('feature.send.you-sent'),
+                formattedAmount: formatUsdtMicros(amountMicros),
+                description: '',
+                nextScreenParams: [
+                    'UsdtWithdrawInitiated',
+                    {
+                        txid,
+                        amountMicros,
+                        recipient: trimmedRecipient,
+                    },
+                ],
             })
         } catch (e) {
             toast.error(t, e)
@@ -131,90 +150,83 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
 
     return (
         <SafeAreaContainer edges="notop">
-            <Column grow gap="lg" style={style.container}>
-                <ScrollView
-                    style={style.scroll}
-                    contentContainerStyle={style.scrollContent}
-                    keyboardShouldPersistTaps="handled"
-                    alwaysBounceVertical={false}>
-                    <Input
-                        label={
-                            <Text caption medium>
-                                {t('feature.usdt.recipient-address')}
-                            </Text>
-                        }
-                        value={recipient}
-                        onChangeText={setRecipient}
-                        placeholder="0x…"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        rightIcon={
-                            <PressableIcon
-                                svgName="Clipboard"
-                                onPress={handlePasteRecipient}
-                            />
-                        }
-                        errorMessage={
-                            trimmedRecipient.length > 0 && !isRecipientValid
-                                ? t('feature.usdt.invalid-address')
-                                : undefined
-                        }
-                    />
-                    <Input
-                        label={
-                            <Text caption medium>
-                                {t('words.amount')}
-                            </Text>
-                        }
-                        value={amountInput}
-                        onChangeText={setAmountInput}
-                        placeholder="0.00"
-                        keyboardType="decimal-pad"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        rightIcon={<Text medium>USDT</Text>}
-                        errorMessage={
-                            hasInsufficientBalance
-                                ? t('feature.usdt.insufficient-balance')
-                                : amountInput.length > 0 &&
-                                    amountMicros === null
-                                  ? t('feature.usdt.invalid-amount')
-                                  : undefined
-                        }
-                    />
-                    <Text caption color={theme.colors.darkGrey}>
-                        {t('feature.wallet.available-balance-amount', {
-                            amount: formatUsdtMicros(balanceMicros),
-                        })}
-                    </Text>
-                    {feeMicros !== null && receivedMicros !== null && (
-                        <Column gap="xs" style={style.feeContainer}>
-                            <Row justify="between">
-                                <Text caption color={theme.colors.darkGrey}>
-                                    {t('feature.usdt.network-fee')}
-                                </Text>
-                                <Text caption medium>
-                                    {formatUsdtMicros(feeMicros)}
-                                </Text>
-                            </Row>
-                            <Row justify="between">
-                                <Text caption color={theme.colors.darkGrey}>
-                                    {t('feature.usdt.recipient-receives')}
-                                </Text>
-                                <Text caption medium>
-                                    {formatUsdtMicros(
-                                        Math.max(receivedMicros, 0),
-                                    )}
-                                </Text>
-                            </Row>
-                        </Column>
-                    )}
-                </ScrollView>
+            <Column grow style={style.container}>
+                <Input
+                    label={
+                        <Text caption medium>
+                            {t('feature.usdt.recipient-address')}
+                        </Text>
+                    }
+                    value={recipient}
+                    onChangeText={setRecipient}
+                    placeholder="0x…"
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    rightIcon={
+                        <PressableIcon
+                            svgName="Clipboard"
+                            onPress={handlePasteRecipient}
+                        />
+                    }
+                    errorMessage={
+                        trimmedRecipient.length > 0 && !isRecipientValid
+                            ? t('feature.usdt.invalid-address')
+                            : undefined
+                    }
+                />
+                <UsdtAmountInput
+                    amountInput={amountInput}
+                    onChangeAmountInput={setAmountInput}
+                    isSubmitting={isSubmitting}
+                    error={
+                        hasInsufficientBalance
+                            ? t('feature.usdt.insufficient-balance')
+                            : amountInput.length > 0 && amountMicros === null
+                              ? t('feature.usdt.invalid-amount')
+                              : null
+                    }
+                    preHeader={
+                        <Text
+                            caption
+                            style={style.balance}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit>
+                            {t('feature.wallet.available-balance-amount', {
+                                amount: formatUsdtMicros(balanceMicros),
+                            })}
+                        </Text>
+                    }
+                    content={
+                        feeMicros !== null && receivedMicros !== null ? (
+                            <Column gap="xs" style={style.feeContainer}>
+                                <Row justify="between">
+                                    <Text caption color={theme.colors.darkGrey}>
+                                        {t('feature.usdt.network-fee')}
+                                    </Text>
+                                    <Text caption medium>
+                                        {formatUsdtMicros(feeMicros)}
+                                    </Text>
+                                </Row>
+                                <Row justify="between">
+                                    <Text caption color={theme.colors.darkGrey}>
+                                        {t('feature.usdt.recipient-receives')}
+                                    </Text>
+                                    <Text caption medium>
+                                        {formatUsdtMicros(
+                                            Math.max(receivedMicros, 0),
+                                        )}
+                                    </Text>
+                                </Row>
+                            </Column>
+                        ) : null
+                    }
+                />
                 <Button
                     title={t('words.send')}
                     onPress={handleSend}
                     loading={isSubmitting}
                     disabled={!canSend || isSubmitting}
+                    containerStyle={style.button}
                 />
             </Column>
         </SafeAreaContainer>
@@ -226,16 +238,18 @@ const styles = (theme: Theme) =>
         container: {
             paddingTop: theme.spacing.lg,
         },
-        scroll: {
-            flex: 1,
-        },
-        scrollContent: {
-            gap: theme.spacing.sm,
+        balance: {
+            color: hexToRgba(theme.colors.primary, 0.6),
+            textAlign: 'center',
         },
         feeContainer: {
             padding: theme.spacing.md,
+            marginHorizontal: theme.spacing.lg,
             backgroundColor: theme.colors.offWhite100,
             borderRadius: theme.borders.tileRadius,
+        },
+        button: {
+            marginTop: theme.spacing.md,
         },
     })
 

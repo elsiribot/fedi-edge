@@ -1,25 +1,30 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
-import { Text, Theme, useTheme } from '@rneui/themed'
+import { Button, Text, Theme, useTheme } from '@rneui/themed'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ActivityIndicator, StyleSheet } from 'react-native'
+import { ActivityIndicator, Pressable, StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
 import { refreshUsdtBalance, selectPaymentFederation } from '@fedi/common/redux'
 import { makeLog } from '@fedi/common/utils/log'
-import { formatUsdtMicros } from '@fedi/common/utils/usdt'
+import { formatUsdtMicros, parseUsdtInput } from '@fedi/common/utils/usdt'
 
 import ReceiveQr from '../components/feature/receive/ReceiveQr'
 import { Column, Row } from '../components/ui/Flex'
 import { SafeAreaContainer } from '../components/ui/SafeArea'
 import SvgImage from '../components/ui/SvgImage'
+import UsdtAmountInput from '../components/ui/UsdtAmountInput'
 import { useAppDispatch, useAppSelector } from '../state/hooks'
 import type { RootStackParamList } from '../types/navigation'
 
 const log = makeLog('UsdtReceive')
 
 export type Props = NativeStackScreenProps<RootStackParamList, 'UsdtReceive'>
+
+/** Converts micros to a plain decimal string, e.g. 1500000 -> "1.50" */
+const microsToDecimalString = (micros: number): string =>
+    formatUsdtMicros(micros, { symbol: false }).replace(/,/g, '')
 
 const UsdtReceive: React.FC<Props> = () => {
     const { t } = useTranslation()
@@ -33,6 +38,11 @@ const UsdtReceive: React.FC<Props> = () => {
 
     const [address, setAddress] = useState<string | null>(null)
     const [receivedMicros, setReceivedMicros] = useState(0)
+    // Optional requested amount, encoded as a Fedi-convention
+    // `ethereum:<address>?amount=<decimal USDT>` URI in the QR
+    const [requestedMicros, setRequestedMicros] = useState<number | null>(null)
+    const [isEnteringAmount, setIsEnteringAmount] = useState(false)
+    const [amountInput, setAmountInput] = useState('')
 
     // Generate a fresh deposit address on mount
     useEffect(() => {
@@ -88,38 +98,99 @@ const UsdtReceive: React.FC<Props> = () => {
         }
     }, [address, federationId, fedimint, dispatch])
 
+    const handleEditRequestAmount = () => {
+        setAmountInput(
+            requestedMicros ? microsToDecimalString(requestedMicros) : '',
+        )
+        setIsEnteringAmount(true)
+    }
+
+    const handleConfirmRequestAmount = () => {
+        // Ignore a transient trailing decimal point, e.g. "5."
+        const amountMicros = parseUsdtInput(amountInput.replace(/\.$/, ''))
+        setRequestedMicros(
+            amountMicros !== null && amountMicros > 0 ? amountMicros : null,
+        )
+        setIsEnteringAmount(false)
+    }
+
+    const requestUri =
+        address && requestedMicros
+            ? `ethereum:${address}?amount=${microsToDecimalString(requestedMicros)}`
+            : (address ?? '')
+
     const style = styles(theme)
+
+    if (isEnteringAmount) {
+        return (
+            <SafeAreaContainer edges="notop">
+                <Column grow style={style.container}>
+                    <UsdtAmountInput
+                        amountInput={amountInput}
+                        onChangeAmountInput={setAmountInput}
+                    />
+                    <Button
+                        title={t('words.done')}
+                        onPress={handleConfirmRequestAmount}
+                        containerStyle={style.button}
+                    />
+                </Column>
+            </SafeAreaContainer>
+        )
+    }
 
     return (
         <SafeAreaContainer edges="notop">
             <Column grow gap="lg" style={style.container}>
                 <ReceiveQr
                     uri={{
-                        fullString: address ?? '',
-                        body: address ?? '',
+                        fullString: requestUri,
+                        body: requestUri,
                     }}
                     isLoading={!address}>
-                    <Row center gap="sm" style={style.statusContainer}>
-                        {receivedMicros > 0 ? (
-                            <>
+                    <Column gap="sm">
+                        <Pressable
+                            disabled={!address}
+                            onPress={handleEditRequestAmount}>
+                            <Row center gap="sm">
                                 <SvgImage
-                                    name="Check"
-                                    size="sm"
-                                    color={theme.colors.moneyGreen}
+                                    name="Edit"
+                                    size={16}
+                                    color={theme.colors.primary}
                                 />
                                 <Text caption medium>
-                                    {`${t('feature.usdt.deposit-received')}: ${formatUsdtMicros(receivedMicros)}`}
+                                    {requestedMicros
+                                        ? t('feature.usdt.requesting-amount', {
+                                              amount: formatUsdtMicros(
+                                                  requestedMicros,
+                                              ),
+                                          })
+                                        : t('feature.usdt.request-amount')}
                                 </Text>
-                            </>
-                        ) : (
-                            <>
-                                <ActivityIndicator size="small" />
-                                <Text caption color={theme.colors.darkGrey}>
-                                    {t('feature.usdt.awaiting-deposit')}
-                                </Text>
-                            </>
-                        )}
-                    </Row>
+                            </Row>
+                        </Pressable>
+                        <Row center gap="sm" style={style.statusContainer}>
+                            {receivedMicros > 0 ? (
+                                <>
+                                    <SvgImage
+                                        name="Check"
+                                        size="sm"
+                                        color={theme.colors.moneyGreen}
+                                    />
+                                    <Text caption medium>
+                                        {`${t('feature.usdt.deposit-received')}: ${formatUsdtMicros(receivedMicros)}`}
+                                    </Text>
+                                </>
+                            ) : (
+                                <>
+                                    <ActivityIndicator size="small" />
+                                    <Text caption color={theme.colors.darkGrey}>
+                                        {t('feature.usdt.awaiting-deposit')}
+                                    </Text>
+                                </>
+                            )}
+                        </Row>
+                    </Column>
                 </ReceiveQr>
             </Column>
         </SafeAreaContainer>
@@ -136,6 +207,9 @@ const styles = (theme: Theme) =>
             backgroundColor: theme.colors.offWhite100,
             borderRadius: theme.borders.tileRadius,
             width: '100%',
+        },
+        button: {
+            marginTop: theme.spacing.md,
         },
     })
 

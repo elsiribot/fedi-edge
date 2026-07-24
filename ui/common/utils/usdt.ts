@@ -74,6 +74,13 @@ export function isValidEvmAddress(address: string): boolean {
     return /^0x[0-9a-fA-F]{40}$/.test(address)
 }
 
+export type ParsedUsdtRecipient = {
+    /** Bare `0x…` recipient address */
+    address: string
+    /** Requested amount in micros, from an `?amount=` (decimal USDT) param */
+    amountMicros?: number
+}
+
 /**
  * Parses scanned/pasted input into a USDT recipient (EVM) address.
  *
@@ -81,20 +88,42 @@ export function isValidEvmAddress(address: string): boolean {
  * - Raw `0x…` (40 hex chars) addresses
  * - `ethereum:0x…` URIs, with an optional `@chainId` suffix, EIP-681
  *   function name (e.g. `/transfer`) and/or `?param=…` query string.
- *   Any EIP-681 amount parameters (`value` / `uint256`) are deliberately
- *   ignored — the user always enters the amount themselves.
  *
- * Returns the bare `0x…` address, or `null` if the input does not
- * contain a valid EVM address.
+ * A Fedi-convention `?amount=<decimal USDT>` query param is extracted so
+ * a Fedi-to-Fedi scan can prefill the send amount. EIP-681 amount params
+ * (`value` / `uint256`) are deliberately ignored — they are ambiguous
+ * for token transfers.
+ *
+ * Returns the bare `0x…` address (plus the requested amount, if any),
+ * or `null` if the input does not contain a valid EVM address.
  */
-export function parseUsdtRecipientInput(input: string): string | null {
+export function parseUsdtRecipientInput(
+    input: string,
+): ParsedUsdtRecipient | null {
     let candidate = input.trim()
+    let query: string | undefined
 
     const uriMatch = candidate.match(/^ethereum:(.+)$/i)
     if (uriMatch) {
-        // Strip optional query params, EIP-681 function name and chain id
-        candidate = uriMatch[1].split('?')[0].split('/')[0].split('@')[0]
+        // Split off query params, then strip the EIP-681 function name
+        // and chain id from the target address
+        const [target, ...queryParts] = uriMatch[1].split('?')
+        query = queryParts.join('?')
+        candidate = target.split('/')[0].split('@')[0]
     }
 
-    return isValidEvmAddress(candidate) ? candidate : null
+    if (!isValidEvmAddress(candidate)) return null
+
+    let amountMicros: number | undefined
+    if (query) {
+        for (const param of query.split('&')) {
+            const [key, value = ''] = param.split('=')
+            if (key.toLowerCase() !== 'amount') continue
+            const parsed = parseUsdtInput(decodeURIComponent(value))
+            if (parsed !== null && parsed > 0) amountMicros = parsed
+            break
+        }
+    }
+
+    return { address: candidate, amountMicros }
 }

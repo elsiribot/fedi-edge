@@ -6,6 +6,7 @@ import React, { useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { StyleSheet, View } from 'react-native'
 
+import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
 import { parseUsdtRecipientInput } from '@fedi/common/utils/usdt'
 
@@ -22,34 +23,53 @@ export type Props = NativeStackScreenProps<RootStackParamList, 'UsdtSend'>
  *
  * The omni parser doesn't understand EVM addresses, so scanned/pasted
  * input is parsed locally via `parseUsdtRecipientInput`. Raw `0x…`
- * addresses and `ethereum:0x…` URIs are accepted; any EIP-681 amount
- * params (`value`/`uint256`) are ignored — the amount is always entered
- * on the next screen.
+ * addresses and `ethereum:0x…` URIs are accepted; a Fedi-convention
+ * `?amount=` (decimal USDT) param prefills the amount on the next
+ * screen, where it stays editable. Scanned ecash tokens are routed to
+ * the ClaimEcash screen instead.
  */
 const UsdtSend: React.FC<Props> = ({ navigation }) => {
     const { t } = useTranslation()
     const toast = useToast()
+    const fedimint = useFedimint()
     // Pause scanning while the amount step (or another screen) is on top
     const isFocused = useIsFocused()
 
-    // Avoid spamming toasts while an invalid QR code stays in view
+    // Avoid spamming toasts / ecash checks while an invalid QR code stays in view
     const lastInvalidInputRef = useRef<string | null>(null)
 
     const handleInput = useCallback(
-        (data: string) => {
+        async (data: string) => {
             const recipient = parseUsdtRecipientInput(data)
             if (recipient) {
                 lastInvalidInputRef.current = null
-                navigation.navigate('UsdtSendAmount', { recipient })
-            } else if (lastInvalidInputRef.current !== data) {
-                lastInvalidInputRef.current = data
-                toast.show({
-                    content: t('feature.usdt.invalid-address'),
-                    status: 'error',
+                navigation.navigate('UsdtSendAmount', {
+                    recipient: recipient.address,
+                    amountMicros: recipient.amountMicros,
                 })
+                return
             }
+            if (lastInvalidInputRef.current === data) return
+            lastInvalidInputRef.current = data
+            // Not an address — check if it's an ecash token and route it
+            // to the claim flow instead (mirrors the omni parser)
+            try {
+                await fedimint.parseEcash(data)
+                toast.show({
+                    content: t('feature.usdt.ecash-detected'),
+                    status: 'info',
+                })
+                navigation.navigate('ClaimEcash', { id: data })
+                return
+            } catch {
+                // no-op, not ecash
+            }
+            toast.show({
+                content: t('feature.usdt.invalid-address'),
+                status: 'error',
+            })
         },
-        [navigation, t, toast],
+        [fedimint, navigation, t, toast],
     )
 
     const handlePaste = useCallback(async () => {

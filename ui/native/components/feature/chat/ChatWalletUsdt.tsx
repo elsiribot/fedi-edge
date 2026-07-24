@@ -1,14 +1,16 @@
-import { Button, Input, Text, Theme, useTheme } from '@rneui/themed'
+import { Button, Text, Theme, useTheme } from '@rneui/themed'
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Keyboard, StyleSheet } from 'react-native'
+import { StyleSheet } from 'react-native'
 
 import { useChatUsdtPayment } from '@fedi/common/hooks/chat'
+import { hexToRgba } from '@fedi/common/utils/color'
 import { formatUsdtMicros, parseUsdtInput } from '@fedi/common/utils/usdt'
 
 import { Column, Row } from '../../ui/Flex'
 import { SafeAreaContainer } from '../../ui/SafeArea'
 import SvgImage from '../../ui/SvgImage'
+import UsdtAmountInput from '../../ui/UsdtAmountInput'
 import FederationWalletSelector from '../send/FederationWalletSelector'
 
 /**
@@ -31,7 +33,8 @@ const ChatWalletUsdt: React.FC<{
     const { balanceMicros, isProcessing, handleRequestUsdtPayment } =
         useChatUsdtPayment(t, roomId, recipientId)
 
-    const amountMicros = parseUsdtInput(amountInput)
+    // Ignore a transient trailing decimal point mid-entry, e.g. "5."
+    const amountMicros = parseUsdtInput(amountInput.replace(/\.$/, ''))
     const hasInsufficientBalance =
         amountMicros !== null && amountMicros > balanceMicros
     const isAmountValid = amountMicros !== null && amountMicros > 0
@@ -39,14 +42,12 @@ const ChatWalletUsdt: React.FC<{
     const handleSend = () => {
         setSubmitAttempts(attempts => attempts + 1)
         if (!isAmountValid || hasInsufficientBalance) return
-        Keyboard.dismiss()
         onSendConfirm(amountMicros)
     }
 
     const handleRequest = () => {
         setSubmitAttempts(attempts => attempts + 1)
         if (!isAmountValid) return
-        Keyboard.dismiss()
         handleRequestUsdtPayment(amountMicros, onRequestSuccess)
     }
 
@@ -56,48 +57,38 @@ const ChatWalletUsdt: React.FC<{
         <SafeAreaContainer edges="notop">
             <Column grow gap="lg" style={style.container}>
                 <FederationWalletSelector fullWidth />
-                <Row gap="xs" center>
-                    {/* Official Tether mark carries its own colors, no tint */}
-                    <SvgImage name="UsdtCircle" size={16} />
-                    <Text bold caption>
-                        {t('words.ecash')}
-                    </Text>
-                </Row>
-                <Column grow gap="sm">
-                    <Input
-                        label={
-                            <Text caption medium>
-                                {t('words.amount')}
+                <UsdtAmountInput
+                    amountInput={amountInput}
+                    onChangeAmountInput={setAmountInput}
+                    isSubmitting={isProcessing}
+                    error={
+                        hasInsufficientBalance
+                            ? t('feature.usdt.insufficient-balance')
+                            : submitAttempts > 0 && !isAmountValid
+                              ? t('feature.usdt.invalid-amount')
+                              : null
+                    }
+                    preHeader={
+                        <Column gap="sm">
+                            <Row gap="xs" center>
+                                {/* Official Tether mark carries its own colors, no tint */}
+                                <SvgImage name="UsdtCircle" size={16} />
+                                <Text bold caption>
+                                    {t('words.ecash')}
+                                </Text>
+                            </Row>
+                            <Text
+                                caption
+                                style={style.balance}
+                                numberOfLines={1}
+                                adjustsFontSizeToFit>
+                                {t('feature.wallet.available-balance-amount', {
+                                    amount: formatUsdtMicros(balanceMicros),
+                                })}
                             </Text>
-                        }
-                        value={amountInput}
-                        onChangeText={setAmountInput}
-                        placeholder="0.00"
-                        keyboardType="decimal-pad"
-                        autoCapitalize="none"
-                        autoCorrect={false}
-                        rightIcon={
-                            <Text medium style={style.usdtSuffix}>
-                                USDT
-                            </Text>
-                        }
-                        errorMessage={
-                            hasInsufficientBalance
-                                ? t('feature.usdt.insufficient-balance')
-                                : amountInput.length > 0 &&
-                                    amountMicros === null
-                                  ? t('feature.usdt.invalid-amount')
-                                  : submitAttempts > 0 && !isAmountValid
-                                    ? t('feature.usdt.invalid-amount')
-                                    : undefined
-                        }
-                    />
-                    <Text caption color={theme.colors.darkGrey}>
-                        {t('feature.wallet.available-balance-amount', {
-                            amount: formatUsdtMicros(balanceMicros),
-                        })}
-                    </Text>
-                </Column>
+                        </Column>
+                    }
+                />
                 <Row gap="md" fullWidth>
                     <Button
                         containerStyle={style.button}
@@ -125,11 +116,12 @@ const styles = (theme: Theme) =>
         container: {
             paddingTop: theme.spacing.lg,
         },
+        balance: {
+            color: hexToRgba(theme.colors.primary, 0.6),
+            textAlign: 'center',
+        },
         button: {
             flex: 1,
-        },
-        usdtSuffix: {
-            color: theme.colors.moneyGreen,
         },
     })
 

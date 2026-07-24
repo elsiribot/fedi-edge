@@ -238,6 +238,8 @@ export type RootStackParamList = {
         formattedAmount: string
         description: string
         federationId?: Federation['id']
+        // Where to go after the success ceremony (defaults to wallets)
+        nextScreenParams?: NavigationArgs
     }
     Settings: undefined
     ShareLogs: { ticketNumber: string } | undefined
@@ -282,7 +284,7 @@ export type RootStackParamList = {
     Transactions: { federationId: Federation['id'] }
     UsdtReceive: undefined
     UsdtSend: undefined
-    UsdtSendAmount: { recipient: string }
+    UsdtSendAmount: { recipient: string; amountMicros?: number }
     UsdtSendOfflineAmount: undefined
     UsdtSendOfflineQr: { ecash: string; amountMicros: number }
     UsdtHistory: { federationId: Federation['id'] }

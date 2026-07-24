@@ -1565,7 +1565,19 @@
             "deposit": "Deposit",
             "withdrawal": "Withdrawal",
             "ecash-sent": "Ecash sent",
-            "ecash-received": "Ecash received"
+            "ecash-received": "Ecash received",
+            "ecash-detected": "This is ecash — claiming instead",
+            "request-amount": "Request amount",
+            "requesting-amount": "Requesting: {{amount}}",
+            "deposit-address": "Deposit address",
+            "transaction-id": "Transaction ID",
+            "block": "Block",
+            "status-queued": "Queued",
+            "status-signing": "Signing",
+            "status-submitted": "Submitted",
+            "status-confirmed": "Confirmed",
+            "status-failed": "Failed",
+            "status-pending": "Pending"
         },
         "updates": {
             "new-app-version": "New App Version",

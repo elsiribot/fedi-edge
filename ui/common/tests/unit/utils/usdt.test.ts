@@ -93,27 +93,62 @@ describe('usdt utils', () => {
         const address = '0xdAC17F958D2ee523a2206206994597C13D831ec7'
 
         it('accepts raw 0x addresses', () => {
-            expect(parseUsdtRecipientInput(address)).toBe(address)
-            expect(parseUsdtRecipientInput(`  ${address}  `)).toBe(address)
+            expect(parseUsdtRecipientInput(address)).toEqual({ address })
+            expect(parseUsdtRecipientInput(`  ${address}  `)).toEqual({
+                address,
+            })
         })
 
         it('accepts ethereum: URIs', () => {
-            expect(parseUsdtRecipientInput(`ethereum:${address}`)).toBe(address)
-            expect(parseUsdtRecipientInput(`ETHEREUM:${address}`)).toBe(address)
+            expect(parseUsdtRecipientInput(`ethereum:${address}`)).toEqual({
+                address,
+            })
+            expect(parseUsdtRecipientInput(`ETHEREUM:${address}`)).toEqual({
+                address,
+            })
         })
 
         it('strips chain ids and query params, ignoring EIP-681 amounts', () => {
-            expect(parseUsdtRecipientInput(`ethereum:${address}@1`)).toBe(
+            expect(parseUsdtRecipientInput(`ethereum:${address}@1`)).toEqual({
                 address,
-            )
+            })
             expect(
                 parseUsdtRecipientInput(`ethereum:${address}?value=1000000`),
-            ).toBe(address)
+            ).toEqual({ address })
             expect(
                 parseUsdtRecipientInput(
                     `ethereum:${address}@1/transfer?uint256=1000000`,
                 ),
-            ).toBe(address)
+            ).toEqual({ address })
+        })
+
+        it('extracts the amount param as decimal USDT', () => {
+            expect(
+                parseUsdtRecipientInput(`ethereum:${address}?amount=1.5`),
+            ).toEqual({ address, amountMicros: 1_500_000 })
+            expect(
+                parseUsdtRecipientInput(`ethereum:${address}@1?amount=25`),
+            ).toEqual({ address, amountMicros: 25_000_000 })
+            expect(
+                parseUsdtRecipientInput(
+                    `ethereum:${address}?foo=bar&amount=0.000001`,
+                ),
+            ).toEqual({ address, amountMicros: 1 })
+        })
+
+        it('ignores invalid or non-positive amount params', () => {
+            expect(
+                parseUsdtRecipientInput(`ethereum:${address}?amount=abc`),
+            ).toEqual({ address })
+            expect(
+                parseUsdtRecipientInput(`ethereum:${address}?amount=0`),
+            ).toEqual({ address })
+            expect(
+                parseUsdtRecipientInput(`ethereum:${address}?amount=`),
+            ).toEqual({ address })
+            expect(
+                parseUsdtRecipientInput(`ethereum:${address}?amount=1.2345678`),
+            ).toEqual({ address })
         })
 
         it('rejects invalid input', () => {
@@ -121,6 +156,9 @@ describe('usdt utils', () => {
             expect(parseUsdtRecipientInput('0x1234')).toBeNull()
             expect(parseUsdtRecipientInput('ethereum:0x1234')).toBeNull()
             expect(parseUsdtRecipientInput('bitcoin:bc1qxyz')).toBeNull()
+            expect(
+                parseUsdtRecipientInput('ethereum:0x1234?amount=1.5'),
+            ).toBeNull()
         })
     })
 })

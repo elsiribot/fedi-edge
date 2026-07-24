@@ -348,13 +348,17 @@ impl FederationV2 {
                         },
                     }),
                     Ok(UsdtOperationMeta::Withdraw {
-                        recipient, amount, ..
+                        recipient,
+                        amount,
+                        txid,
+                        ..
                     }) => Some(RpcUsdtTransaction {
                         created_at,
                         amount: RpcUsdtAmount(amount.0),
                         incoming: false,
                         kind: RpcUsdtTransactionKind::Withdrawal {
                             recipient: recipient.to_string(),
+                            txid: txid.map(|txid| txid.to_string()),
                         },
                     }),
                     Err(_) => None,

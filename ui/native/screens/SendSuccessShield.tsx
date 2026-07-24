@@ -1,7 +1,6 @@
-import { useNavigation } from '@react-navigation/native'
 import { NativeStackScreenProps } from '@react-navigation/native-stack'
 import { Button, Text, useTheme } from '@rneui/themed'
-import React, { useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { selectShouldRateFederation } from '@fedi/common/redux'
@@ -18,16 +17,26 @@ export type Props = NativeStackScreenProps<
     'SendSuccessShield'
 >
 
-const SendSuccessShield: React.FC<Props> = ({ route }: Props) => {
-    const { title, formattedAmount, description } = route.params
+const SendSuccessShield: React.FC<Props> = ({ route, navigation }: Props) => {
+    const { title, formattedAmount, description, nextScreenParams } =
+        route.params
 
     const [showRateFederation, setShowRateFederation] = useState(false)
-    const navigation = useNavigation()
     const { t } = useTranslation()
     const shouldRateFederation = useAppSelector(s =>
         selectShouldRateFederation(s),
     )
     const { theme } = useTheme()
+
+    // Some flows (e.g. USDT withdrawals) chain the success ceremony into a
+    // follow-up status screen instead of landing back on the wallets tab
+    const handleContinue = useCallback(() => {
+        if (nextScreenParams) {
+            navigation.replace(...nextScreenParams)
+        } else {
+            navigation.dispatch(resetToWallets())
+        }
+    }, [navigation, nextScreenParams])
 
     return (
         <>
@@ -56,7 +65,7 @@ const SendSuccessShield: React.FC<Props> = ({ route }: Props) => {
                             if (shouldRateFederation) {
                                 setShowRateFederation(true)
                             } else {
-                                navigation.dispatch(resetToWallets())
+                                handleContinue()
                             }
                         }}
                     />
@@ -67,9 +76,13 @@ const SendSuccessShield: React.FC<Props> = ({ route }: Props) => {
                     show={showRateFederation}
                     onDismiss={() => {
                         setShowRateFederation(false)
-                        navigation.navigate('TabsNavigator', {
-                            initialRouteName: 'Wallet',
-                        })
+                        if (nextScreenParams) {
+                            navigation.replace(...nextScreenParams)
+                        } else {
+                            navigation.navigate('TabsNavigator', {
+                                initialRouteName: 'Wallet',
+                            })
+                        }
                     }}
                 />
             )}

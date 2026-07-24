@@ -77,9 +77,15 @@ pub enum RpcUsdtTransactionKind {
     /// On-chain deposit claimed into e-cash; `address` is the deposit account
     #[serde(rename_all = "camelCase")]
     Deposit { address: String },
-    /// On-chain withdrawal; `recipient` is the destination address
+    /// On-chain withdrawal; `recipient` is the destination address. `txid`
+    /// (when recorded) keys `usdtWithdrawalStatus` for live status.
     #[serde(rename_all = "camelCase")]
-    Withdrawal { recipient: String },
+    Withdrawal {
+        recipient: String,
+        #[ts(optional)]
+        #[serde(skip_serializing_if = "Option::is_none")]
+        txid: Option<String>,
+    },
     /// USDT e-cash sent (e.g. in chat)
     EcashSend,
     /// USDT e-cash received (claimed notes / chat payment)

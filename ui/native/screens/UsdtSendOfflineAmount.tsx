@@ -1,8 +1,8 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
-import { Button, Input, Text, Theme, useTheme } from '@rneui/themed'
+import { Button, Text, Theme, useTheme } from '@rneui/themed'
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Keyboard, StyleSheet } from 'react-native'
+import { StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
@@ -11,10 +11,12 @@ import {
     selectPaymentFederation,
     selectUsdtBalanceMicros,
 } from '@fedi/common/redux'
+import { hexToRgba } from '@fedi/common/utils/color'
 import { formatUsdtMicros, parseUsdtInput } from '@fedi/common/utils/usdt'
 
 import { Column } from '../components/ui/Flex'
 import { SafeAreaContainer } from '../components/ui/SafeArea'
+import UsdtAmountInput from '../components/ui/UsdtAmountInput'
 import { useAppDispatch, useAppSelector } from '../state/hooks'
 import type { RootStackParamList } from '../types/navigation'
 
@@ -43,7 +45,8 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
     const [amountInput, setAmountInput] = useState('')
     const [isGenerating, setIsGenerating] = useState(false)
 
-    const amountMicros = parseUsdtInput(amountInput)
+    // Ignore a transient trailing decimal point mid-entry, e.g. "5."
+    const amountMicros = parseUsdtInput(amountInput.replace(/\.$/, ''))
     const hasInsufficientBalance =
         amountMicros !== null && amountMicros > balanceMicros
     const isAmountValid =
@@ -53,7 +56,6 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
         if (!federationId || !isAmountValid || isGenerating) return
 
         setIsGenerating(true)
-        Keyboard.dismiss()
         try {
             const { ecash } = await fedimint.usdtGenerateEcash(
                 federationId,
@@ -75,41 +77,37 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
 
     return (
         <SafeAreaContainer edges="notop">
-            <Column grow gap="sm" style={style.container}>
-                <Input
-                    label={
-                        <Text caption medium>
-                            {t('words.amount')}
-                        </Text>
-                    }
-                    value={amountInput}
-                    onChangeText={setAmountInput}
-                    placeholder="0.00"
-                    keyboardType="decimal-pad"
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    rightIcon={<Text medium>USDT</Text>}
-                    errorMessage={
+            <Column grow style={style.container}>
+                <UsdtAmountInput
+                    amountInput={amountInput}
+                    onChangeAmountInput={setAmountInput}
+                    isSubmitting={isGenerating}
+                    error={
                         hasInsufficientBalance
                             ? t('feature.usdt.insufficient-balance')
                             : amountInput.length > 0 && amountMicros === null
                               ? t('feature.usdt.invalid-amount')
-                              : undefined
+                              : null
+                    }
+                    preHeader={
+                        <Text
+                            caption
+                            style={style.balance}
+                            numberOfLines={1}
+                            adjustsFontSizeToFit>
+                            {t('feature.wallet.available-balance-amount', {
+                                amount: formatUsdtMicros(balanceMicros),
+                            })}
+                        </Text>
                     }
                 />
-                <Text caption color={theme.colors.darkGrey}>
-                    {t('feature.wallet.available-balance-amount', {
-                        amount: formatUsdtMicros(balanceMicros),
-                    })}
-                </Text>
-                <Column grow justify="end">
-                    <Button
-                        title={t('words.next')}
-                        onPress={handleNext}
-                        loading={isGenerating}
-                        disabled={!isAmountValid || isGenerating}
-                    />
-                </Column>
+                <Button
+                    title={t('words.next')}
+                    onPress={handleNext}
+                    loading={isGenerating}
+                    disabled={!isAmountValid || isGenerating}
+                    containerStyle={style.button}
+                />
             </Column>
         </SafeAreaContainer>
     )
@@ -119,6 +117,13 @@ const styles = (theme: Theme) =>
     StyleSheet.create({
         container: {
             paddingTop: theme.spacing.lg,
+        },
+        balance: {
+            color: hexToRgba(theme.colors.primary, 0.6),
+            textAlign: 'center',
+        },
+        button: {
+            marginTop: theme.spacing.md,
         },
     })
 
