@@ -470,6 +470,7 @@ export const makeMatrixPaymentText = ({
     makeFormattedAmountsFromMSats,
     transaction,
     makeFormattedAmountsFromTxn,
+    verifiedAmountMicros,
 }: {
     t: TFunction
     event: MatrixPaymentEvent
@@ -480,6 +481,15 @@ export const makeMatrixPaymentText = ({
     transaction: RpcTransaction | null | undefined
     makeFormattedAmountsFromMSats: (amt: MSats) => FormattedAmounts
     makeFormattedAmountsFromTxn: (txn: TransactionListEntry) => FormattedAmounts
+    /**
+     * The USDT amount (in micros) the attached ecash was actually verified
+     * to be worth, e.g. via `fedimint.parseEcash`. `undefined` while
+     * verification is in flight, `null` when there's nothing to verify
+     * (a request with no ecash yet) or verification failed. When present,
+     * this is preferred over `event.content.amount`, which is
+     * sender-declared and cannot be trusted for display.
+     */
+    verifiedAmountMicros?: number | null
 }): string => {
     const {
         sender: eventSenderId,
@@ -494,20 +504,26 @@ export const makeMatrixPaymentText = ({
     // USDT-denominated payments carry the amount in USDT micros and are
     // displayed as "X.XX USDT" instead of fiat + SATS
     if (event.content.unit === 'usdt') {
+        // prefer the amount verified against the actual ecash, falling back
+        // to the sender-declared amount if verification hasn't
+        // resolved/isn't applicable — same fallback shape as the BTC branch
+        // below falling back to `amount` when `transaction` is unavailable
+        const displayAmountMicros =
+            typeof verifiedAmountMicros === 'number'
+                ? verifiedAmountMicros
+                : amount
+
         const usdtStringParams = {
             name: eventSender?.displayName || matrixIdToUsername(eventSenderId),
             recipient:
                 paymentRecipient?.displayName ||
                 matrixIdToUsername(paymentRecipientId),
-            amount: formatUsdtMicros(amount),
+            amount: formatUsdtMicros(displayAmountMicros),
         }
 
         if (eventSenderId === paymentRecipientId) {
             if (eventSenderId === myId) {
-                return t(
-                    'feature.usdt.you-requested-payment',
-                    usdtStringParams,
-                )
+                return t('feature.usdt.you-requested-payment', usdtStringParams)
             } else {
                 return t(
                     'feature.usdt.they-requested-payment',

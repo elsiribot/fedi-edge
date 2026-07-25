@@ -1811,10 +1811,21 @@ export const claimMatrixPayment = createAsyncThunk<
             throw new Error('Payment message is missing federationId')
 
         let receiverOperationId: string | undefined
+        // the amount actually redeemed from the ecash, when it differs from
+        // (or simply confirms) the sender-declared `event.content.amount` —
+        // used to correct the post-claim status update below so the bubble
+        // never displays an unverified, sender-controlled amount
+        let redeemedAmountMicros: number | undefined
         if (event.content.unit === 'usdt') {
             // USDT-denominated ecash is redeemed via the USDT module and
-            // has no receiver operation ID
-            await fedimint.usdtReceiveEcash(ecash, federationId)
+            // has no receiver operation ID. Capture what was actually
+            // redeemed rather than trusting the sender-declared `amount` —
+            // a malicious sender could declare an amount far larger than
+            // what the attached ecash note is actually worth.
+            redeemedAmountMicros = await fedimint.usdtReceiveEcash(
+                ecash,
+                federationId,
+            )
             dispatch(refreshUsdtBalance({ fedimint, federationId }))
         } else {
             const frontendMetadata = {
@@ -1839,6 +1850,13 @@ export const claimMatrixPayment = createAsyncThunk<
             body: 'Payment received.', // TODO: i18n?
             status: 'received',
             receiverOperationId, // will be undefined for old clients, which is fine
+            // for usdt, override the sender-declared amount with what was
+            // actually redeemed so `consolidatePaymentEvents` (which merges
+            // this update's content over the original) makes post-claim
+            // display reflect reality, not the sender's claim
+            ...(redeemedAmountMicros !== undefined
+                ? { amount: redeemedAmountMicros }
+                : {}),
         })
 
         await client.markRoomAsUnread(event.roomId, true)

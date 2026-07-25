@@ -702,10 +702,13 @@ export function useMatrixPaymentEvent({
     }, [isOffline, toast, t])
 
     // add transaction fetching with the appropriate operation ID
-    const { transaction, isLoading: isLoadingTransaction } =
-        useMatrixPaymentTransaction({
-            event,
-        })
+    const {
+        transaction,
+        isLoading: isLoadingTransaction,
+        verifiedAmountMicros,
+    } = useMatrixPaymentTransaction({
+        event,
+    })
 
     const messageText = makeMatrixPaymentText({
         t,
@@ -719,6 +722,12 @@ export function useMatrixPaymentEvent({
         transaction,
         makeFormattedAmountsFromMSats,
         makeFormattedAmountsFromTxn,
+        // for usdt pushes, prefer the amount verified against the actual
+        // ecash over the sender-declared amount in the event body; falls
+        // back to the declared amount (unverified) while loading, for
+        // requests with no ecash, or if verification fails — mirroring how
+        // the branch above falls back when `transaction` fetch fails
+        verifiedAmountMicros,
     })
 
     const paymentStatus = event.content.status
@@ -1449,6 +1458,15 @@ export function useMatrixPaymentTransaction({
     const [transaction, setTransaction] = useState<
         RpcTransaction | null | undefined
     >(undefined)
+    // USDT payments carry an ecash token that can be independently verified
+    // against the amount the sender *declared* in the chat message. This is
+    // that verified amount (in USDT micros), NOT the declared one:
+    // undefined = not yet tried (or loading), null = tried & nothing to
+    // verify (a request with no ecash attached yet, or verification
+    // failed), number = the actual amount redeemable from the ecash.
+    const [verifiedAmountMicros, setVerifiedAmountMicros] = useState<
+        number | null | undefined
+    >(undefined)
     const [hasTriedFetch, setHasTriedFetch] = useState(false)
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<unknown>(null)
@@ -1467,11 +1485,48 @@ export function useMatrixPaymentTransaction({
         const isSentByMe = event.content.senderId === currentUserId
 
         // USDT payment operations don't appear in the bitcoin transaction
-        // history, so don't attempt to fetch a transaction for them
+        // history, so don't attempt to fetch a transaction for them. Instead,
+        // when ecash is attached (pushed payments), verify the amount it's
+        // actually redeemable for via the bridge — the `amount` in the event
+        // body is sender-declared and must not be trusted for display.
         if (event.content.unit === 'usdt') {
-            setHasTriedFetch(true)
-            setTransaction(null)
-            setIsLoading(false)
+            const { ecash } = event.content
+
+            // requests have no ecash attached yet, so there's nothing to
+            // verify against; the declared amount is all that exists
+            if (!ecash) {
+                setHasTriedFetch(true)
+                setTransaction(null)
+                setVerifiedAmountMicros(null)
+                setIsLoading(false)
+                return
+            }
+
+            const verifyEcashAmount = async () => {
+                setHasTriedFetch(true)
+                setIsLoading(true)
+                setError(null)
+
+                try {
+                    const info = await fedimint.parseEcash(ecash)
+                    setVerifiedAmountMicros(info.amount)
+                    log.debug(
+                        `Verified USDT payment amount for ${event.content.paymentId}: ${info.amount} micros`,
+                    )
+                } catch (err) {
+                    log.error(
+                        `Failed to validate USDT ecash for payment ${event.content.paymentId}, will fall back to displaying the declared (unverified) amount`,
+                        err,
+                    )
+                    setError(err)
+                    setVerifiedAmountMicros(null)
+                } finally {
+                    setTransaction(null)
+                    setIsLoading(false)
+                }
+            }
+
+            verifyEcashAmount()
             return
         }
 
@@ -1561,7 +1616,13 @@ export function useMatrixPaymentTransaction({
         fetchTransaction()
     }, [event.content, fedimint, currentUserId, hasTriedFetch])
 
-    return { transaction, hasTriedFetch, isLoading, error }
+    return {
+        transaction,
+        hasTriedFetch,
+        isLoading,
+        error,
+        verifiedAmountMicros,
+    }
 }
 
 /**
