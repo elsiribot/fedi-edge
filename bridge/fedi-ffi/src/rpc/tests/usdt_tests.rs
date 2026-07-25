@@ -352,6 +352,177 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Mixed BTC+USDT federation coverage.
+///
+/// Composes a devfed carrying the Bitcoin v1 modules (mintv1 + walletv1 +
+/// lnv1/lnv2) the USDT-only sibling omits, PLUS the usdt module and its
+/// USDT-denominated mintv2, then drives the bridge to prove BTC and USDT
+/// e-cash coexist and route by note unit.
+///
+/// NOTE (composition probe): the bridge selects `MintOpsV2` whenever ANY
+/// mintv2 instance is present, and routes every Bitcoin e-cash op to
+/// `mintv2_of_unit(BITCOIN)`. So a *working* mixed federation requires TWO
+/// mintv2 instances -- one BITCOIN-denominated (the Bitcoin balance) and one
+/// USDT-denominated (the usdt module's mint). This test first asserts the
+/// devfed actually composed both; if the harness could only give the single
+/// USDT mintv2 (the known devimint one-instance-per-kind limitation), the
+/// probe fails loudly here rather than silently degrading to a USDT-only fed.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
+    use federations::federation_v2::client::ClientExt;
+    use fedimint_core::module::AmountUnit;
+
+    if std::env::var("RUN_USDT_TESTS").is_err() {
+        info!("skipping mixed btc+usdt e2e (set RUN_USDT_TESTS=1 and run in the nix dev shell)");
+        return Ok(());
+    }
+    let _ = TracingSetup::default().init();
+
+    let (process_mgr, _task_group) = DevFed::process_setup(4).await?;
+
+    info!("starting bitcoind + anvil + synapse + nostr relay");
+    let (bitcoind, anvil, synapse, nostr_relay) = tokio::try_join!(
+        Bitcoind::new(&process_mgr, false),
+        Anvil::new(&process_mgr),
+        Synapse::start(&process_mgr),
+        NostrRelay::start(&process_mgr),
+    )?;
+    // SAFETY: single-threaded at this point.
+    unsafe {
+        std::env::set_var("DEVI_SYNAPSE_SERVER", &synapse.url);
+        std::env::set_var("DEVI_NOSTR_RELAY", &nostr_relay.url);
+    }
+
+    info!("deploying test ERC-20 + ERC-4337 EntryPoint");
+    let holder = account_1_address()?;
+    let token = deploy_test_erc20(&anvil, holder, UsdtAmount(100_000_000)).await?;
+    let entry_point = deploy_entry_point(&anvil).await?;
+
+    // SAFETY: single-threaded at this point; set before any fedimintd
+    // subprocess is spawned so every guardian inherits these.
+    unsafe {
+        // Mixed federation: the Bitcoin v1 stack PLUS usdt + USDT mintv2.
+        std::env::set_var(FM_ENABLE_MODULE_USDT_ENV, "1");
+        std::env::set_var(FM_ENABLE_MODULE_MINTV2_ENV, "1");
+        std::env::set_var(FM_ENABLE_MODULE_MINT_ENV, "1");
+        std::env::set_var(FM_ENABLE_MODULE_WALLET_ENV, "1");
+        std::env::set_var(FM_ENABLE_MODULE_WALLETV2_ENV, "0");
+        std::env::set_var(FM_ENABLE_MODULE_LNV1_ENV, "1");
+        std::env::set_var(FM_ENABLE_MODULE_LNV2_ENV, "1");
+        // The single mintv2 instance the harness can create is USDT-denominated
+        // (the usdt module mints claimed deposits into it).
+        std::env::set_var(
+            FM_MINTV2_AMOUNT_UNIT_ENV,
+            serde_json::to_value(USDT_UNIT)
+                .expect("AmountUnit is serializable")
+                .to_string(),
+        );
+        std::env::set_var(FM_DISABLE_BASE_FEES_ENV, "1");
+        std::env::set_var(FM_USDT_CONTRACT_ENV, token.to_string());
+        std::env::set_var(FM_USDT_ENTRY_POINT_ENV, entry_point.to_string());
+        std::env::set_var(
+            FM_USDT_BROADCASTER_PRIVATE_KEY_ENV,
+            ANVIL_ACCOUNT_0_PRIVATE_KEY,
+        );
+        std::env::set_var(
+            FM_USDT_ETH_USD_PRICE_FEED_ENV,
+            EvmAddress([0u8; 20]).to_string(),
+        );
+        std::env::set_var(
+            devimint::envs::FM_DEVIMINT_CONFIG_GEN_TIMEOUT_SECS_ENV,
+            "300",
+        );
+    }
+
+    info!("starting the mixed BTC+USDT federation (real cggmp21 DKG, takes minutes)");
+    let fed = Federation::new(
+        &process_mgr,
+        bitcoind,
+        false,
+        false,
+        0,
+        "default".to_string(),
+    )
+    .await?;
+    let invite_code = fed.invite_code()?;
+
+    info!("joining via the bridge");
+    let td = TestDevice::new().await?;
+    let bridge = td.bridge_full().await?;
+    let rpc_federation = rpc::joinFederation(bridge, invite_code, false).await?;
+    let federation = bridge
+        .federations
+        .get_federation(&rpc_federation.id.0)
+        .context("federation must be ready after join")?;
+
+    // Assertion 1: usdt supported, zero USDT balance to start.
+    ensure!(
+        federation.usdt_supported(),
+        "joined federation must report the usdt module"
+    );
+    ensure!(
+        federation.usdt_balance().await?.0 == 0,
+        "fresh client must start at zero USDT balance"
+    );
+
+    // Composition probe: enumerate the mintv2 instances the DKG actually built.
+    let mintv2_units: Vec<AmountUnit> = federation
+        .client
+        .mintv2_instances()
+        .await
+        .iter()
+        .map(|m| m.amount_unit())
+        .collect();
+    let module_kinds: Vec<String> = federation
+        .client
+        .config()
+        .await
+        .modules
+        .values()
+        .map(|m| m.kind().to_string())
+        .collect();
+    info!(
+        ?module_kinds,
+        ?mintv2_units,
+        "joined mixed-fed module composition"
+    );
+
+    let has_btc_mintv2 = mintv2_units.contains(&AmountUnit::BITCOIN);
+    let has_usdt_mintv2 = mintv2_units.contains(&USDT_UNIT);
+    ensure!(
+        has_usdt_mintv2,
+        "expected a USDT-denominated mintv2 instance, got units {mintv2_units:?}"
+    );
+    ensure!(
+        has_btc_mintv2,
+        "MIXED-FED COMPOSITION BLOCKER: the devfed built mintv2 units {mintv2_units:?} \
+         (module kinds {module_kinds:?}) -- there is NO BITCOIN-denominated mintv2, so the \
+         bridge's MintOpsV2 Bitcoin balance/e-cash path (mintv2_of_unit(BITCOIN)) is dead. \
+         Composing a BITCOIN mintv2 alongside the usdt module's USDT mintv2 needs two \
+         instances of the mintv2 kind, which devimint's real-DKG config-gen cannot create \
+         (build_module_params_registry attaches exactly one instance per enabled kind, and \
+         fedimint-cli `admin setup set-local-params` exposes no module-instance-list override)."
+    );
+
+    // BTC e-cash path (only reachable if the BITCOIN mintv2 exists).
+    let btc_ecash = federation
+        .generate_ecash(
+            fedimint_core::Amount::from_sats(1000),
+            false,
+            FrontendMetadata::default(),
+        )
+        .await
+        .context("BTC generate_ecash failed")?;
+    let parsed = bridge
+        .federations
+        .validate_ecash(btc_ecash.ecash.clone())
+        .await?;
+    info!(?parsed, "parsed BTC ecash");
+
+    info!("mixed btc+usdt e2e composition probe complete");
+    Ok(())
+}
+
 async fn poll_until<F, Fut>(
     deadline: Duration,
     interval: Duration,

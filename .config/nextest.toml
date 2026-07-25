@@ -2,10 +2,11 @@
 # no matter the profile, we want to kill tests that hanged on something
 slow-timeout = { period = "60s", terminate-after = 3 }
 
-# The usdt bridge e2e runs a real cggmp21 DKG (100s+ per federation setup)
-# plus a full deposit->claim->withdraw round trip; give it 30 minutes.
+# The usdt bridge e2e tests run a real cggmp21 DKG (100s+ per federation
+# setup) plus full deposit->claim->withdraw / mixed-fed round trips; give
+# them 30 minutes.
 [[profile.default.overrides]]
-filter = 'test(test_usdt_bridge_end_to_end)'
+filter = 'test(test_usdt_bridge_end_to_end) + test(test_mixed_btc_usdt_federation)'
 slow-timeout = { period = "60s", terminate-after = 30 }
 
 # define `dev` to allow running cargo and nextest with the same profile name
