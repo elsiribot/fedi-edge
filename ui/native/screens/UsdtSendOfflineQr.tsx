@@ -9,12 +9,12 @@ import { Alert, Pressable, StyleSheet } from 'react-native'
 import { WEB_APP_URL } from '@fedi/common/constants/api'
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
+import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import {
     refreshUsdtBalance,
     selectIsInternetUnreachable,
     selectPaymentFederation,
 } from '@fedi/common/redux'
-import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import { Column, Row } from '../components/ui/Flex'
 import HoloAlert from '../components/ui/HoloAlert'
@@ -42,6 +42,7 @@ const UsdtSendOfflineQr: React.FC<Props> = ({ navigation, route }: Props) => {
     const toast = useToast()
     const fedimint = useFedimint()
     const dispatch = useAppDispatch()
+    const formatUsdt = useFormatUsdtMicros()
     const [index, setIndex] = useState(0)
     const [isCancelling, setIsCancelling] = useState(false)
     const federation = useAppSelector(selectPaymentFederation)
@@ -60,7 +61,7 @@ const UsdtSendOfflineQr: React.FC<Props> = ({ navigation, route }: Props) => {
         return () => clearInterval(interval)
     }, [index, frames])
 
-    const formattedAmount = formatUsdtMicros(amountMicros)
+    const formattedAmount = formatUsdt(amountMicros)
     const style = styles(theme)
 
     const shareLink = `${WEB_APP_URL}/link#screen=ecash&id=${ecash}`

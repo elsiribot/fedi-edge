@@ -1735,6 +1735,11 @@ export const sendMatrixUsdtPaymentPush = createAsyncThunk<
 
         await client.sendMessage(roomId, {
             msgtype: 'xyz.fedi.payment',
+            // Locale-less, mirroring the BTC branch above
+            // (`amountUtils.formatSats`, which has no `locale` param at
+            // all) - this thunk has no React context to pull
+            // `selectCurrencyLocale` from without threading it through
+            // every caller just for this message body.
             body: `Sent payment of ${formatUsdtMicros(amountMicros)}. Use the Fedi app to accept this payment.`, // TODO: i18n? this only shows to matrix clients, not Fedi users
             status: 'pushed',
             paymentId,
@@ -1785,6 +1790,9 @@ export const sendMatrixUsdtPaymentRequest = createAsyncThunk<
 
         await client.sendMessage(roomId, {
             msgtype: 'xyz.fedi.payment',
+            // Locale-less - see the sibling `sendMatrixUsdtPaymentPush`
+            // thunk above for why this mirrors the BTC path's
+            // `amountUtils.formatSats` (also locale-less).
             body: `Requested payment of ${formatUsdtMicros(amountMicros)}. Use the Fedi app to complete this request.`, // TODO: i18n?
             paymentId,
             status: 'requested',
@@ -2189,6 +2197,9 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
 
             await client.sendMessage(event.roomId, {
                 ...event.content,
+                // Locale-less - see `sendMatrixUsdtPaymentPush` above for
+                // why this mirrors the BTC branch below (`amountUtils.
+                // formatSats`, also locale-less).
                 body: `Sent payment of ${formatUsdtMicros(amount)}.`, // TODO: i18n?
                 status: 'accepted',
                 senderId: matrixAuth.userId,

@@ -4,13 +4,13 @@ import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { StyleSheet, TouchableOpacity, View } from 'react-native'
 
+import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import {
     RpcUsdtTransaction,
     RpcUsdtWithdrawalStatus,
 } from '@fedi/common/types/bindings'
 import dateUtils from '@fedi/common/utils/DateUtils'
 import { hexToRgba } from '@fedi/common/utils/color'
-import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import CenterOverlay from '../../ui/CenterOverlay'
 import { Column } from '../../ui/Flex'
@@ -104,6 +104,7 @@ const UsdtHistoryDetailOverlay: React.FC<Props> = ({
 }) => {
     const { t } = useTranslation()
     const { theme } = useTheme()
+    const formatUsdt = useFormatUsdtMicros()
 
     const style = styles(theme)
 
@@ -178,7 +179,7 @@ const UsdtHistoryDetailOverlay: React.FC<Props> = ({
                     {getUsdtTxnKindText(t, txn)}
                 </Text>
                 <Text h2 medium>
-                    {`${txn.incoming ? '+' : '-'}${formatUsdtMicros(txn.amount)}`}
+                    {`${txn.incoming ? '+' : '-'}${formatUsdt(txn.amount)}`}
                 </Text>
                 <Column gap="xs" fullWidth style={style.detailItemsContainer}>
                     {items.map((item, idx) => (

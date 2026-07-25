@@ -7,7 +7,11 @@ import { StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
-import { useUsdtDecimalSeparator } from '@fedi/common/hooks/usdt'
+import {
+    useFormatUsdtMicros,
+    useUsdtDecimalSeparator,
+    useUsdtGroupingSeparator,
+} from '@fedi/common/hooks/usdt'
 import {
     selectPaymentFederation,
     selectUsdtBalanceMicros,
@@ -15,7 +19,6 @@ import {
 import { hexToRgba } from '@fedi/common/utils/color'
 import { makeLog } from '@fedi/common/utils/log'
 import {
-    formatUsdtMicros,
     isValidEvmAddress,
     microsToDecimalString,
     parseUsdtInput,
@@ -43,6 +46,8 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
     const toast = useToast()
     const fedimint = useFedimint()
     const decimalSeparator = useUsdtDecimalSeparator()
+    const groupingSeparator = useUsdtGroupingSeparator()
+    const formatUsdt = useFormatUsdtMicros()
 
     const federation = useAppSelector(selectPaymentFederation)
     const federationId = federation?.id ?? ''
@@ -66,7 +71,10 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
     const isRecipientValid = isValidEvmAddress(trimmedRecipient)
     // `parseUsdtInput` itself tolerates a transient trailing decimal
     // separator mid-entry, e.g. "5."
-    const amountMicros = parseUsdtInput(amountInput, { decimalSeparator })
+    const amountMicros = parseUsdtInput(amountInput, {
+        decimalSeparator,
+        groupingSeparator,
+    })
     const hasInsufficientBalance =
         amountMicros !== null && amountMicros > balanceMicros
     const isAmountValid =
@@ -131,7 +139,7 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
             )
             navigation.replace('SendSuccessShield', {
                 title: t('feature.send.you-sent'),
-                formattedAmount: formatUsdtMicros(amountMicros),
+                formattedAmount: formatUsdt(amountMicros),
                 description: '',
                 nextScreenParams: [
                     'UsdtWithdrawInitiated',
@@ -195,7 +203,7 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
                             numberOfLines={1}
                             adjustsFontSizeToFit>
                             {t('feature.wallet.available-balance-amount', {
-                                amount: formatUsdtMicros(balanceMicros),
+                                amount: formatUsdt(balanceMicros),
                             })}
                         </Text>
                     }
@@ -207,7 +215,7 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
                                         {t('feature.usdt.network-fee')}
                                     </Text>
                                     <Text caption medium>
-                                        {formatUsdtMicros(feeMicros)}
+                                        {formatUsdt(feeMicros)}
                                     </Text>
                                 </Row>
                                 <Row justify="between">
@@ -215,7 +223,7 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
                                         {t('feature.usdt.recipient-receives')}
                                     </Text>
                                     <Text caption medium>
-                                        {formatUsdtMicros(
+                                        {formatUsdt(
                                             Math.max(receivedMicros, 0),
                                         )}
                                     </Text>

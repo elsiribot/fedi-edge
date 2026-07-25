@@ -13,13 +13,13 @@ import {
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
+import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import { TransactionStatusBadge } from '@fedi/common/types'
 import type { RpcUsdtWithdrawalStatus } from '@fedi/common/types/bindings'
 import dateUtils from '@fedi/common/utils/DateUtils'
 import stringUtils from '@fedi/common/utils/StringUtils'
 import type { RpcUsdtTransaction } from '@fedi/common/utils/fedimint'
 import { makeLog } from '@fedi/common/utils/log'
-import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import { HistoryIcon } from '../components/feature/transaction-history/HistoryIcon'
 import UsdtHistoryDetailOverlay, {
@@ -78,6 +78,7 @@ const UsdtHistory: React.FC<Props> = ({ route }: Props) => {
     const { theme } = useTheme()
     const toast = useToast()
     const fedimint = useFedimint()
+    const formatUsdt = useFormatUsdtMicros()
 
     const [transactions, setTransactions] = useState<RpcUsdtTransaction[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -169,7 +170,7 @@ const UsdtHistory: React.FC<Props> = ({ route }: Props) => {
             const address = getKindAddress(txn)
             const txid = getKindTxid(txn)
             const status = txid ? statusByTxid[txid] : undefined
-            const signedAmount = `${txn.incoming ? '+' : '-'}${formatUsdtMicros(
+            const signedAmount = `${txn.incoming ? '+' : '-'}${formatUsdt(
                 txn.amount,
             )}`
             return (
@@ -223,7 +224,7 @@ const UsdtHistory: React.FC<Props> = ({ route }: Props) => {
                 </Pressable>
             )
         },
-        [statusByTxid, style, t, theme],
+        [statusByTxid, style, t, theme, formatUsdt],
     )
 
     return (

@@ -27,9 +27,40 @@ export const useUsdtDecimalSeparator = (): string => {
     return amountUtils.getDecimalSeparator({ locale: currencyLocale })
 }
 
+/**
+ * Returns the grouping (thousands) separator (e.g. `,` for en-US, `.` for
+ * de-DE, the narrow no-break space U+202F for fr-FR) for the user's
+ * currency locale, for passing to `parseUsdtInput`'s `groupingSeparator`
+ * option alongside `useUsdtDecimalSeparator`'s decimal separator, so the
+ * parser can always re-parse `formatUsdtMicros`' own grouped output.
+ */
+export const useUsdtGroupingSeparator = (): string => {
+    const currencyLocale = useCommonSelector(selectCurrencyLocale)
+    return amountUtils.getThousandsSeparator({ locale: currencyLocale })
+}
+
+/**
+ * Returns a `formatUsdtMicros` bound to the user's currency locale
+ * (`selectCurrencyLocale`) - the same locale source `useUsdtDecimalSeparator`
+ * uses for the numpad/parser - so USDT amount displays never drift from the
+ * input's locale. Use this at every React (screen/component/hook) call site
+ * that displays a USDT amount; `formatUsdtMicros` itself stays locale-less
+ * for non-React contexts, where it mirrors how the BTC path formats amounts
+ * in that same context (see `utils/matrix.ts`/`redux/matrix.ts`).
+ */
+export const useFormatUsdtMicros = () => {
+    const currencyLocale = useCommonSelector(selectCurrencyLocale)
+    return useCallback(
+        (micros: number, opts: { symbol?: boolean } = {}) =>
+            formatUsdtMicros(micros, { ...opts, locale: currencyLocale }),
+        [currencyLocale],
+    )
+}
+
 export const useUsdtBalance = (federationId: Federation['id']) => {
     const dispatch = useCommonDispatch()
     const fedimint = useFedimint()
+    const formatUsdt = useFormatUsdtMicros()
     const balanceMicros = useCommonSelector(s =>
         selectUsdtBalanceMicros(s, federationId),
     )
@@ -40,7 +71,7 @@ export const useUsdtBalance = (federationId: Federation['id']) => {
 
     return {
         balanceMicros,
-        formattedBalance: formatUsdtMicros(balanceMicros),
+        formattedBalance: formatUsdt(balanceMicros),
         refreshBalance,
     }
 }

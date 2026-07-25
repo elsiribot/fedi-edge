@@ -4,9 +4,13 @@ import { useTranslation } from 'react-i18next'
 import { StyleSheet } from 'react-native'
 
 import { useChatUsdtPayment } from '@fedi/common/hooks/chat'
-import { useUsdtDecimalSeparator } from '@fedi/common/hooks/usdt'
+import {
+    useFormatUsdtMicros,
+    useUsdtDecimalSeparator,
+    useUsdtGroupingSeparator,
+} from '@fedi/common/hooks/usdt'
 import { hexToRgba } from '@fedi/common/utils/color'
-import { formatUsdtMicros, parseUsdtInput } from '@fedi/common/utils/usdt'
+import { parseUsdtInput } from '@fedi/common/utils/usdt'
 
 import { Column, Row } from '../../ui/Flex'
 import { SafeAreaContainer } from '../../ui/SafeArea'
@@ -31,13 +35,18 @@ const ChatWalletUsdt: React.FC<{
     const [amountInput, setAmountInput] = useState('')
     const [submitAttempts, setSubmitAttempts] = useState(0)
     const decimalSeparator = useUsdtDecimalSeparator()
+    const groupingSeparator = useUsdtGroupingSeparator()
+    const formatUsdt = useFormatUsdtMicros()
 
     const { balanceMicros, isProcessing, handleRequestUsdtPayment } =
         useChatUsdtPayment(t, roomId, recipientId)
 
     // `parseUsdtInput` tolerates a transient trailing decimal separator
     // mid-entry, e.g. "5."
-    const amountMicros = parseUsdtInput(amountInput, { decimalSeparator })
+    const amountMicros = parseUsdtInput(amountInput, {
+        decimalSeparator,
+        groupingSeparator,
+    })
     const hasInsufficientBalance =
         amountMicros !== null && amountMicros > balanceMicros
     const isAmountValid = amountMicros !== null && amountMicros > 0
@@ -86,7 +95,7 @@ const ChatWalletUsdt: React.FC<{
                                 numberOfLines={1}
                                 adjustsFontSizeToFit>
                                 {t('feature.wallet.available-balance-amount', {
-                                    amount: formatUsdtMicros(balanceMicros),
+                                    amount: formatUsdt(balanceMicros),
                                 })}
                             </Text>
                         </Column>

@@ -7,10 +7,10 @@ import Hyperlink from 'react-native-hyperlink'
 
 import { useParseEcash, useClaimEcash } from '@fedi/common/hooks/pay'
 import { useToast } from '@fedi/common/hooks/toast'
+import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import { RpcEcashInfo } from '@fedi/common/types/bindings'
 import amountUtils from '@fedi/common/utils/AmountUtils'
 import { getFederationTosUrl } from '@fedi/common/utils/FederationUtils'
-import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import { FederationLogo } from '../components/feature/federations/FederationLogo'
 import { Row, Column } from '../components/ui/Flex'
@@ -28,6 +28,7 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
     const { theme } = useTheme()
     const { t } = useTranslation()
     const toast = useToast()
+    const formatUsdt = useFormatUsdtMicros()
 
     const [tosUrl, setTosUrl] = useState<string | null>(null)
 
@@ -72,7 +73,7 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
     // mintv2 notes may be denominated in a non-Bitcoin unit (e.g. USDT)
     const formatEcashAmount = (info: RpcEcashInfo) =>
         info.federation_type === 'joined' && info.unit === 'usdt'
-            ? formatUsdtMicros(info.amount)
+            ? formatUsdt(info.amount)
             : `${amountUtils.msatToSatString(info.amount)} SATS`
 
     const style = styles(theme)

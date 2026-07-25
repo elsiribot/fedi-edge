@@ -6,6 +6,7 @@ import { Pressable, StyleSheet } from 'react-native'
 import { HIDDEN_AMOUNT_MASK } from '@fedi/common/constants/currency'
 import { useBalance } from '@fedi/common/hooks/amount'
 import { useRecoveryProgress } from '@fedi/common/hooks/recovery'
+import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import {
     selectBalanceDisplay,
     selectCurrency,
@@ -14,7 +15,6 @@ import {
     selectUsdtBalanceMicros,
 } from '@fedi/common/redux'
 import { getCurrencyCode } from '@fedi/common/utils/currency'
-import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import { useAppSelector, useStabilityPool } from '../../../state/hooks'
 import { Column, Row } from '../../ui/Flex'
@@ -29,6 +29,7 @@ export default function WalletBalanceCard({
 }) {
     const { t } = useTranslation()
     const { theme } = useTheme()
+    const formatUsdt = useFormatUsdtMicros()
     const { formattedBalanceSats, formattedBalanceFiat } = useBalance(
         t,
         federationId,
@@ -82,7 +83,7 @@ export default function WalletBalanceCard({
         iconName = 'UsdtCircle'
         iconColor = undefined
         headerTitle = t('feature.usdt.usdt-balance')
-        primaryAmount = formatUsdtMicros(usdtBalanceMicros)
+        primaryAmount = formatUsdt(usdtBalanceMicros)
         secondaryAmount = null
     }
 

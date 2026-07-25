@@ -1,3 +1,4 @@
+import amountUtils from '../../../utils/AmountUtils'
 import {
     formatUsdtMicros,
     isValidEvmAddress,
@@ -118,6 +119,72 @@ describe('usdt utils', () => {
                 parseUsdtInput('1.5.5', { decimalSeparator: '.' }),
             ).toBeNull()
         })
+
+        it('accepts an explicit groupingSeparator that overrides the legacy guess', () => {
+            // de-CH groups with U+2019 (right single quotation mark) and
+            // decimals with '.' - the legacy guess (',') would never match
+            // this, so it must come from the explicit option
+            expect(
+                parseUsdtInput('1\u2019234.56', {
+                    decimalSeparator: '.',
+                    groupingSeparator: '\u2019',
+                }),
+            ).toBe(1_234_560_000)
+        })
+
+        it('recognizes space- and apostrophe-like grouping separators even when not passed explicitly', () => {
+            // fr-FR's narrow no-break space (U+202F)
+            expect(
+                parseUsdtInput('1\u202F234,56', { decimalSeparator: ',' }),
+            ).toBe(1_234_560_000)
+            // a plain space (U+0020) typed in place of the narrow no-break space
+            expect(
+                parseUsdtInput('1\u0020234,56', { decimalSeparator: ',' }),
+            ).toBe(1_234_560_000)
+            // a no-break space (U+00A0)
+            expect(
+                parseUsdtInput('1\u00A0234,56', { decimalSeparator: ',' }),
+            ).toBe(1_234_560_000)
+            // de-CH's apostrophe (either code point), decimal separator '.'
+            expect(
+                parseUsdtInput('1\u0027234.56', { decimalSeparator: '.' }),
+            ).toBe(1_234_560_000)
+            expect(
+                parseUsdtInput('1\u2019234.56', { decimalSeparator: '.' }),
+            ).toBe(1_234_560_000)
+        })
+
+        it('still rejects malformed groupings with the new candidates', () => {
+            // second group is only 2 digits, not a well-formed group of 3
+            expect(
+                parseUsdtInput('1\u002023,56', { decimalSeparator: ',' }),
+            ).toBeNull()
+            expect(
+                parseUsdtInput('1\u002723,56', { decimalSeparator: '.' }),
+            ).toBeNull()
+        })
+
+        it.each(['en-US', 'de-DE', 'fr-FR', 'de-CH'])(
+            'round-trips formatUsdtMicros through parseUsdtInput for %s',
+            locale => {
+                const decimalSeparator = amountUtils.getDecimalSeparator({
+                    locale,
+                })
+                const groupingSeparator = amountUtils.getThousandsSeparator({
+                    locale,
+                })
+                const formatted = formatUsdtMicros(1_234_560_000, {
+                    locale,
+                    symbol: false,
+                })
+                expect(
+                    parseUsdtInput(formatted, {
+                        decimalSeparator,
+                        groupingSeparator,
+                    }),
+                ).toBe(1_234_560_000)
+            },
+        )
     })
 
     describe('isValidEvmAddress', () => {

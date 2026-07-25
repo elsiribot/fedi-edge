@@ -18,6 +18,23 @@ function escapeRegExp(value: string): string {
 }
 
 /**
+ * Space-like characters various locales/platforms use as a grouping
+ * separator, e.g. `Intl.NumberFormat('fr-FR').format(...)` groups with
+ * U+202F (narrow no-break space), but a plain space or U+00A0 (no-break
+ * space) are common substitutes a user might type/paste. Treated as
+ * interchangeable grouping separators regardless of `opts.groupingSeparator`.
+ */
+const GROUPING_SPACE_CHARS = ['\u0020', '\u00A0', '\u202F']
+
+/**
+ * Apostrophe-like characters used as a grouping separator by some locales
+ * (e.g. de-CH), which - depending on the JS engine's ICU data - may render
+ * as either the ASCII apostrophe (U+0027) or the Unicode right single
+ * quotation mark (U+2019).
+ */
+const GROUPING_APOSTROPHE_CHARS = ['\u0027', '\u2019']
+
+/**
  * Splits an amount of USDT micros into its sign, whole-USDT part, and a
  * decimal-digit string (2..6 digits, trailing zeros beyond the 2nd place
  * stripped) - using integer division/modulo throughout. This is the
@@ -93,18 +110,32 @@ export function microsToDecimalString(micros: number): string {
  * Parses user input of a decimal USDT amount into micros.
  *
  * `opts.decimalSeparator` identifies the locale's decimal separator (e.g.
- * `.` for en-US, `,` for de-DE) so the *other* character (`,`/`.`) is
- * treated as a grouping separator and stripped when it forms well-formed
- * digit groups of 3 (e.g. `"1,000"` with `decimalSeparator: '.'` parses as
- * 1000 USDT; `"1,5"` with `decimalSeparator: ','` parses as 1.5 USDT). A
- * trailing decimal separator is tolerated, e.g. `"5."` parses as 5 USDT -
- * useful for validating amounts while they're still being typed.
+ * `.` for en-US, `,` for de-DE). When present, grouping separators are
+ * recognized and stripped so the function can re-parse its own
+ * `formatUsdtMicros({ locale })` output, in this priority order:
+ *   1. `opts.groupingSeparator`, if passed (the caller's locale grouping
+ *      separator, e.g. via `amountUtils.getThousandsSeparator({ locale })`).
+ *   2. The legacy `,`/`.` counterpart of `decimalSeparator` (kept for
+ *      back-compat with callers that only pass `decimalSeparator`).
+ *   3. Space-like characters (U+0020, U+00A0, U+202F) and apostrophe-like
+ *      characters (U+0027, U+2019) - recognized unconditionally, since
+ *      these are the grouping characters `Intl.NumberFormat` actually
+ *      produces for space/apostrophe-grouping locales (e.g. fr-FR's
+ *      U+202F, de-CH's U+2019/U+0027 depending on the JS engine's ICU
+ *      data) and a caller may reasonably type a plain space/apostrophe
+ *      substitute for either.
+ * Each candidate is only stripped when it forms well-formed digit groups of
+ * 3 (e.g. `"1,000"` with `decimalSeparator: '.'` parses as 1000 USDT;
+ * `"1,5"` with `decimalSeparator: ','` parses as 1.5 USDT) - anything else
+ * is ambiguous and rejected (`null`) rather than guessed at. A trailing
+ * decimal separator is tolerated, e.g. `"5."` parses as 5 USDT - useful for
+ * validating amounts while they're still being typed.
  *
  * When `opts.decimalSeparator` is omitted, only `.` is treated as a
  * decimal separator, except a lone `,` is still accepted as one when no
  * `.` is present (legacy behavior - some numeric keypads emit commas for
  * decimals regardless of locale). No grouping separators are recognized
- * in this mode.
+ * in this mode, and `opts.groupingSeparator` is ignored.
  *
  * Returns `null` if the input is not a valid USDT amount (empty,
  * malformed, ambiguous, more than 6 decimal places, or too large to
@@ -112,7 +143,7 @@ export function microsToDecimalString(micros: number): string {
  */
 export function parseUsdtInput(
     input: string,
-    opts: { decimalSeparator?: string } = {},
+    opts: { decimalSeparator?: string; groupingSeparator?: string } = {},
 ): number | null {
     // Strip surrounding whitespace and a trailing currency symbol/suffix
     let trimmed = input.trim().replace(/\s*USDT\s*$/i, '').trim()
@@ -120,17 +151,30 @@ export function parseUsdtInput(
 
     if (opts.decimalSeparator) {
         const decimalSeparator = opts.decimalSeparator
-        const groupingSeparator = decimalSeparator === ',' ? '.' : ','
+
+        // Candidate grouping separators to try, in priority order (see
+        // docstring), deduped while preserving that order.
+        const candidateList = [
+            opts.groupingSeparator,
+            decimalSeparator === ',' ? '.' : ',',
+            ...GROUPING_SPACE_CHARS,
+            ...GROUPING_APOSTROPHE_CHARS,
+        ].filter(
+            (c, i, arr): c is string =>
+                !!c && c !== decimalSeparator && arr.indexOf(c) === i,
+        )
 
         // Strip grouping separators, but only when they form well-formed
         // groups of 3 digits (e.g. "1,000,000") - otherwise the input is
         // ambiguous and rejected rather than guessed at.
-        if (trimmed.includes(groupingSeparator)) {
+        for (const groupingSeparator of candidateList) {
+            if (!trimmed.includes(groupingSeparator)) continue
             const groupingPattern = new RegExp(
                 `^\\d{1,3}(${escapeRegExp(groupingSeparator)}\\d{3})+(${escapeRegExp(decimalSeparator)}\\d+)?$`,
             )
             if (!groupingPattern.test(trimmed)) return null
             trimmed = trimmed.split(groupingSeparator).join('')
+            break
         }
 
         // Normalize the locale decimal separator to '.'

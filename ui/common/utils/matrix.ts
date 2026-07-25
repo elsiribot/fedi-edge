@@ -552,6 +552,14 @@ export const makeMatrixPaymentText = ({
             recipient:
                 paymentRecipient?.displayName ||
                 matrixIdToUsername(paymentRecipientId),
+            // Mirrors the BTC branch below, which formats via
+            // `amountUtils.formatSats` with no `locale` option either - this
+            // plain (non-hook) function has no access to
+            // `selectCurrencyLocale`, and threading a locale through here
+            // would require every `makeMatrixPaymentText` caller to plumb it
+            // in just for this one display string. Left locale-less
+            // consistently with the BTC path rather than threading it for
+            // USDT alone.
             amount: formatUsdtMicros(displayAmountMicros),
         }
 

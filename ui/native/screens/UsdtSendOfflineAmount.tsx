@@ -6,7 +6,11 @@ import { StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
-import { useUsdtDecimalSeparator } from '@fedi/common/hooks/usdt'
+import {
+    useFormatUsdtMicros,
+    useUsdtDecimalSeparator,
+    useUsdtGroupingSeparator,
+} from '@fedi/common/hooks/usdt'
 import {
     refreshUsdtBalance,
     selectPaymentFederation,
@@ -14,7 +18,7 @@ import {
 } from '@fedi/common/redux'
 import { shouldShowInviteCode } from '@fedi/common/utils/FederationUtils'
 import { hexToRgba } from '@fedi/common/utils/color'
-import { formatUsdtMicros, parseUsdtInput } from '@fedi/common/utils/usdt'
+import { parseUsdtInput } from '@fedi/common/utils/usdt'
 
 import { Column } from '../components/ui/Flex'
 import { SafeAreaContainer } from '../components/ui/SafeArea'
@@ -38,6 +42,8 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
     const fedimint = useFedimint()
     const dispatch = useAppDispatch()
     const decimalSeparator = useUsdtDecimalSeparator()
+    const groupingSeparator = useUsdtGroupingSeparator()
+    const formatUsdt = useFormatUsdtMicros()
 
     const federation = useAppSelector(selectPaymentFederation)
     const federationId = federation?.id ?? ''
@@ -50,7 +56,10 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
 
     // `parseUsdtInput` tolerates a transient trailing decimal separator
     // mid-entry, e.g. "5."
-    const amountMicros = parseUsdtInput(amountInput, { decimalSeparator })
+    const amountMicros = parseUsdtInput(amountInput, {
+        decimalSeparator,
+        groupingSeparator,
+    })
     const hasInsufficientBalance =
         amountMicros !== null && amountMicros > balanceMicros
     const isAmountValid =
@@ -103,7 +112,7 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
                             numberOfLines={1}
                             adjustsFontSizeToFit>
                             {t('feature.wallet.available-balance-amount', {
-                                amount: formatUsdtMicros(balanceMicros),
+                                amount: formatUsdt(balanceMicros),
                             })}
                         </Text>
                     }

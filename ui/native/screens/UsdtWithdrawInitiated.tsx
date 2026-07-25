@@ -7,11 +7,11 @@ import { StyleSheet, View } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
+import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import { selectPaymentFederation } from '@fedi/common/redux'
 import { RpcUsdtWithdrawalStatus } from '@fedi/common/types/bindings'
 import stringUtils from '@fedi/common/utils/StringUtils'
 import { makeLog } from '@fedi/common/utils/log'
-import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import HoloCircle from '../components/ui/HoloCircle'
 import SvgImage from '../components/ui/SvgImage'
@@ -51,6 +51,7 @@ const UsdtWithdrawInitiated: React.FC<Props> = ({ route, navigation }) => {
     const { t } = useTranslation()
     const { theme } = useTheme()
     const fedimint = useFedimint()
+    const formatUsdt = useFormatUsdtMicros()
     const { txid, amountMicros, recipient } = route.params
 
     const federation = useAppSelector(selectPaymentFederation)
@@ -107,7 +108,7 @@ const UsdtWithdrawInitiated: React.FC<Props> = ({ route, navigation }) => {
                                 {t('feature.usdt.withdrawal-initiated')}
                             </Text>
                             <Text h2 medium style={style.holoText}>
-                                {formatUsdtMicros(amountMicros)}
+                                {formatUsdt(amountMicros)}
                             </Text>
                             <Text
                                 caption

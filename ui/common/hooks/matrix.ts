@@ -111,11 +111,11 @@ import {
     areChatListRoomsEqual,
     areMatrixRoomPreviewInputsEqual,
 } from '../utils/matrix'
-import { formatUsdtMicros } from '../utils/usdt'
 import { useAmountFormatter } from './amount'
 import { useFedimint } from './fedimint'
 import { useCommonDispatch, useCommonSelector } from './redux'
 import { useToast } from './toast'
+import { useFormatUsdtMicros } from './usdt'
 import { useDebouncedEffect, useUpdatingRef } from './util'
 
 const log = makeLog('common/hooks/matrix')
@@ -2054,6 +2054,7 @@ export function useMatrixRoomPreview({
     const inviteIsSeen = useCommonSelector(s =>
         selectMatrixRoomInviteIsSeen(s, roomId),
     )
+    const formatUsdt = useFormatUsdtMicros()
 
     const isPublicBroadcast = matrixRoom?.isPublic && matrixRoom.broadcastOnly
 
@@ -2142,7 +2143,7 @@ export function useMatrixRoomPreview({
             // USDT payments carry the amount in USDT micros
             if (paymentUnit === 'usdt') {
                 return t(messageKey as ResourceKey, {
-                    amount: formatUsdtMicros(amount, { symbol: false }),
+                    amount: formatUsdt(amount, { symbol: false }),
                     unit: 'USDT',
                 }) as string
             }
@@ -2164,6 +2165,7 @@ export function useMatrixRoomPreview({
         myId,
         showInvitePreview,
         isUnpreviewablePrivateGroup,
+        formatUsdt,
     ])
 
     return {

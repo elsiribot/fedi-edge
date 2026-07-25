@@ -11,6 +11,7 @@ import {
     useEcashFeeDetails,
     useFeeDisplayUtils,
 } from '@fedi/common/hooks/transactions'
+import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import {
     selectCurrency,
     selectMatrixRoom,
@@ -18,7 +19,6 @@ import {
 } from '@fedi/common/redux'
 import { Sats } from '@fedi/common/types'
 import amountUtils from '@fedi/common/utils/AmountUtils'
-import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import ChatAvatar from '../components/feature/chat/ChatAvatar'
 import FederationWalletSelector from '../components/feature/send/FederationWalletSelector'
@@ -223,12 +223,13 @@ const ConfirmSendChatPaymentUsdt: React.FC<{
     const { theme } = useTheme()
     const { t } = useTranslation()
     const [notes, setNotes] = useState(initialNotes ?? '')
+    const formatUsdt = useFormatUsdtMicros()
 
     const existingRoom = useAppSelector(s => selectMatrixRoom(s, roomId))
     const { balanceMicros, isProcessing, handleSendUsdtPayment } =
         useChatUsdtPayment(t, roomId, existingRoom?.directUserId || '')
 
-    const formattedAmount = formatUsdtMicros(amountMicros)
+    const formattedAmount = formatUsdt(amountMicros)
 
     const onSend = useCallback(async () => {
         handleSendUsdtPayment(
@@ -258,7 +259,7 @@ const ConfirmSendChatPaymentUsdt: React.FC<{
                     <SendAmounts
                         balanceDisplay={t(
                             'feature.wallet.available-balance-amount',
-                            { amount: formatUsdtMicros(balanceMicros) },
+                            { amount: formatUsdt(balanceMicros) },
                         )}
                         formattedPrimaryAmount={
                             <Text
