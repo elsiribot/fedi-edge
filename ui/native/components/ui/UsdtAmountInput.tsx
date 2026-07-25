@@ -4,27 +4,17 @@ import {
     Pressable,
     StyleSheet,
     TextInput,
-    Vibration,
     useWindowDimensions,
 } from 'react-native'
-import Animated, {
-    useSharedValue,
-    useAnimatedStyle,
-    withSequence,
-    withTiming,
-} from 'react-native-reanimated'
 
 import { useUsdtDecimalSeparator } from '@fedi/common/hooks/usdt'
 import { NumpadButtonValue, numpadButtons } from '@fedi/common/types/amount'
-import { makeLog } from '@fedi/common/utils/log'
 import { USDT_DECIMALS } from '@fedi/common/utils/usdt'
 
 import { useForceBlurOnKeyboardHide } from '../../utils/hooks/keyboard'
-import { Row, Column } from './Flex'
+import { Column } from './Flex'
 import InvisibleInput from './InvisibleInput'
-import { NumpadButton } from './NumpadButton'
-
-const log = makeLog('native/components/ui/UsdtAmountInput')
+import { NumpadFrame } from './NumpadFrame'
 
 // Caps the whole part at 999,999,999 USDT so amounts always stay well
 // within Number.isSafeInteger when converted to micros
@@ -58,7 +48,7 @@ const UsdtAmountInput: React.FC<Props> = ({
 }) => {
     const { theme } = useTheme()
     const inputRef = useRef<TextInput>(null)
-    const { height, width } = useWindowDimensions()
+    const { height } = useWindowDimensions()
 
     // For some reason the TextInput inside InvisibleInput does not
     // automatically blur the input when the keyboard is dismissed
@@ -66,7 +56,7 @@ const UsdtAmountInput: React.FC<Props> = ({
     // force the blur to make sure .isFocused() returns false
     useForceBlurOnKeyboardHide(true)
 
-    const style = styles(theme, width)
+    const style = styles(theme)
 
     // Locale-aware decimal separator ('.' for en-US, ',' for de-DE, …).
     // `amountInput` is always kept in this separator - callers must pass
@@ -127,77 +117,48 @@ const UsdtAmountInput: React.FC<Props> = ({
 
     const hasNumpad = height >= 500 && !readOnly
 
-    const shake = useSharedValue(0)
-    const onRejectedPress = () => {
-        Vibration.vibrate(40)
-        shake.value = withSequence(
-            withTiming(8, { duration: 50 }),
-            withTiming(-8, { duration: 50 }),
-            withTiming(0, { duration: 50 }),
-        )
-    }
-    const animatedStyle = useAnimatedStyle(() => ({
-        transform: [{ translateX: shake.value }],
-    }))
-
     return (
-        <Column grow align="center" fullWidth>
-            <Column center gap="sm" grow style={style.amounts}>
-                <Column fullWidth>{preHeader}</Column>
-                <Animated.View style={animatedStyle}>
-                    <Pressable
-                        style={style.primaryAmount}
-                        disabled={readOnly || hasNumpad || isSubmitting}
-                        onPress={() => inputRef?.current?.focus()}>
-                        <InvisibleInput
-                            inputRef={inputRef}
-                            value={amountInput || '0'}
-                            label="USDT"
-                            onChangeText={handleChangeText}
-                            readOnly={readOnly || hasNumpad || isSubmitting}
-                        />
-                    </Pressable>
-                </Animated.View>
-                <Column center fullWidth style={style.errorContainer}>
-                    {error && (
-                        <Text
-                            style={style.error}
-                            caption
-                            testID="amount-input-error">
-                            {error}
-                        </Text>
-                    )}
-                </Column>
-                {content && <Column fullWidth>{content}</Column>}
-            </Column>
-            {hasNumpad && (
-                <Row wrap fullWidth style={style.numpad}>
-                    {numpadButtons.map(btn => (
-                        <NumpadButton
-                            key={btn}
-                            btn={btn}
-                            onPress={() => {
-                                try {
-                                    const rejected = handleNumpadPress(btn)
-                                    if (rejected) onRejectedPress()
-                                } catch (err) {
-                                    log.error('handleNumpadPress', err)
-                                }
-                            }}
-                            disabled={isSubmitting}
-                        />
-                    ))}
-                </Row>
-            )}
-        </Column>
+        <NumpadFrame
+            hasNumpad={hasNumpad}
+            numpadButtons={numpadButtons}
+            onNumpadPress={handleNumpadPress}
+            isSubmitting={isSubmitting}
+            preHeader={preHeader}
+            primaryAmount={
+                <Pressable
+                    style={style.primaryAmount}
+                    disabled={readOnly || hasNumpad || isSubmitting}
+                    onPress={() => inputRef?.current?.focus()}>
+                    <InvisibleInput
+                        inputRef={inputRef}
+                        value={amountInput || '0'}
+                        label="USDT"
+                        onChangeText={handleChangeText}
+                        readOnly={readOnly || hasNumpad || isSubmitting}
+                    />
+                </Pressable>
+            }
+            belowPrimary={
+                <>
+                    <Column center fullWidth style={style.errorContainer}>
+                        {error && (
+                            <Text
+                                style={style.error}
+                                caption
+                                testID="amount-input-error">
+                                {error}
+                            </Text>
+                        )}
+                    </Column>
+                    {content && <Column fullWidth>{content}</Column>}
+                </>
+            }
+        />
     )
 }
 
-const styles = (theme: Theme, width: number) =>
+const styles = (theme: Theme) =>
     StyleSheet.create({
-        amounts: {
-            paddingHorizontal: theme.spacing.lg,
-        },
         primaryAmount: {
             flexDirection: 'row',
             alignItems: 'flex-end',
@@ -206,10 +167,6 @@ const styles = (theme: Theme, width: number) =>
         },
         error: {
             color: theme.colors.red,
-        },
-        numpad: {
-            maxWidth: Math.min(400, width),
-            paddingHorizontal: theme.spacing.lg,
         },
         errorContainer: {
             minHeight: theme.sizes.sm,

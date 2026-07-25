@@ -7,31 +7,21 @@ import {
     StyleSheet,
     TextInput,
     TextStyle,
-    Vibration,
     View,
     useWindowDimensions,
 } from 'react-native'
-import Animated, {
-    useSharedValue,
-    useAnimatedStyle,
-    withSequence,
-    withTiming,
-} from 'react-native-reanimated'
 
 import { useAmountInput } from '@fedi/common/hooks/amount'
 import { Federation, Sats } from '@fedi/common/types'
 import amountUtils from '@fedi/common/utils/AmountUtils'
 import { getCurrencyCode } from '@fedi/common/utils/currency'
-import { makeLog } from '@fedi/common/utils/log'
 
 import { useForceBlurOnKeyboardHide } from '../../utils/hooks/keyboard'
-import { Row, Column } from './Flex'
+import { Column } from './Flex'
 import InvisibleInput from './InvisibleInput'
 import NotesInput from './NotesInput'
-import { NumpadButton } from './NumpadButton'
+import { NumpadFrame } from './NumpadFrame'
 import SvgImage from './SvgImage'
-
-const log = makeLog('native/components/ui/AmountInput')
 
 export type Props = {
     amount: Sats
@@ -96,7 +86,7 @@ const AmountInput: React.FC<Props> = ({
         federationId,
     )
     const inputRef = useRef<TextInput>(null)
-    const { height, width } = useWindowDimensions()
+    const { height } = useWindowDimensions()
 
     // For some reason the TextInput inside InvisibleInput does not
     // automatically blur the input when the keyboard is dismissed
@@ -104,7 +94,7 @@ const AmountInput: React.FC<Props> = ({
     // force the blur to make sure .isFocused() returns false
     useForceBlurOnKeyboardHide(true)
 
-    const style = styles(theme, width)
+    const style = styles(theme)
 
     useEffect(() => {
         if (lockToFiat) setIsFiat(true)
@@ -164,124 +154,95 @@ const AmountInput: React.FC<Props> = ({
         ? `${satsValue} ${t('words.sats').toUpperCase()}`
         : `${fiatValue} ${currency}`
 
-    const shake = useSharedValue(0)
-    const onRejectedPress = () => {
-        Vibration.vibrate(40) // ← added
-        shake.value = withSequence(
-            withTiming(8, { duration: 50 }),
-            withTiming(-8, { duration: 50 }),
-            withTiming(0, { duration: 50 }),
-        )
-    }
-    const animatedStyle = useAnimatedStyle(() => ({
-        transform: [{ translateX: shake.value }],
-    }))
-
     return (
-        <Column grow align="center" fullWidth>
-            <Column center gap="sm" grow style={style.amounts}>
-                <Column fullWidth>{preHeader}</Column>
-                <Animated.View style={animatedStyle}>
-                    <Pressable
-                        style={style.primaryAmount}
-                        disabled={readOnly || hasNumpad || isSubmitting}
-                        onPress={() => inputRef?.current?.focus()}>
-                        <InvisibleInput
-                            inputRef={inputRef}
-                            value={isFiat ? fiatValue : satsValue}
-                            label={
-                                isFiat
-                                    ? getCurrencyCode(currency)
-                                    : t('words.sats').toUpperCase()
-                            }
-                            onChangeText={
-                                isFiat ? handleChangeFiat : handleChangeSats
-                            }
-                            readOnly={readOnly || hasNumpad || isSubmitting}
-                        />
-                    </Pressable>
-                </Animated.View>
-                {switcherEnabled && (
-                    <Pressable
-                        testID="AmountUnitSwitcher"
-                        style={style.symbolSwitcher}
-                        disabled={readOnly || isSubmitting}
-                        onPress={() => setIsFiat(!isFiat)}>
-                        <Text
-                            style={style.secondaryAmountText}
-                            medium
-                            caption
-                            numberOfLines={1}>
-                            {secondaryAmountText}
-                        </Text>
-                        {!readOnly && (
-                            <SvgImage
-                                name="Switch"
-                                color={theme.colors.grey}
-                                size={20}
-                            />
-                        )}
-                    </Pressable>
-                )}
-                <Column center fullWidth style={style.errorContainer}>
-                    {customError ? (
-                        <Text style={style.error} caption>
-                            {customError}
-                        </Text>
-                    ) : (
-                        error
+        <NumpadFrame
+            hasNumpad={hasNumpad}
+            numpadButtons={numpadButtons}
+            onNumpadPress={handleNumpadPress}
+            isSubmitting={isSubmitting}
+            preHeader={preHeader}
+            primaryAmount={
+                <Pressable
+                    style={style.primaryAmount}
+                    disabled={readOnly || hasNumpad || isSubmitting}
+                    onPress={() => inputRef?.current?.focus()}>
+                    <InvisibleInput
+                        inputRef={inputRef}
+                        value={isFiat ? fiatValue : satsValue}
+                        label={
+                            isFiat
+                                ? getCurrencyCode(currency)
+                                : t('words.sats').toUpperCase()
+                        }
+                        onChangeText={
+                            isFiat ? handleChangeFiat : handleChangeSats
+                        }
+                        readOnly={readOnly || hasNumpad || isSubmitting}
+                    />
+                </Pressable>
+            }
+            belowPrimary={
+                <>
+                    {switcherEnabled && (
+                        <Pressable
+                            testID="AmountUnitSwitcher"
+                            style={style.symbolSwitcher}
+                            disabled={readOnly || isSubmitting}
+                            onPress={() => setIsFiat(!isFiat)}>
+                            <Text
+                                style={style.secondaryAmountText}
+                                medium
+                                caption
+                                numberOfLines={1}>
+                                {secondaryAmountText}
+                            </Text>
+                            {!readOnly && (
+                                <SvgImage
+                                    name="Switch"
+                                    color={theme.colors.grey}
+                                    size={20}
+                                />
+                            )}
+                        </Pressable>
                     )}
-                </Column>
-                {/**
-                 * This Content prop used to be used to pass in error messages.
-                 * Now we have a specific prop for that purpose, but some callers still use it.
-                 * TODO: update callers that uses "content" to not do this...
-                 * we should remove "content" all together in favor of the more specific props
-                 */}
-                {content && (
-                    <Column fullWidth style={style.contentMaxHeight}>
-                        {content}
+                    <Column center fullWidth style={style.errorContainer}>
+                        {customError ? (
+                            <Text style={style.error} caption>
+                                {customError}
+                            </Text>
+                        ) : (
+                            error
+                        )}
                     </Column>
-                )}
-                {setNotes && (
-                    <View style={style.notesContainer}>
-                        <NotesInput
-                            label={notesLabel}
-                            notes={notes}
-                            setNotes={setNotes}
-                            isOptional={notesOptional}
-                        />
-                    </View>
-                )}
-            </Column>
-            {hasNumpad && (
-                <Row wrap fullWidth style={style.numpad}>
-                    {numpadButtons.map(btn => (
-                        <NumpadButton
-                            key={btn}
-                            btn={btn}
-                            onPress={() => {
-                                try {
-                                    const rejected = handleNumpadPress(btn)
-                                    if (rejected) onRejectedPress()
-                                } catch (err) {
-                                    log.error('handleNumpadPress', err)
-                                }
-                            }}
-                            disabled={isSubmitting}
-                        />
-                    ))}
-                </Row>
-            )}
-        </Column>
+                    {/**
+                     * This Content prop used to be used to pass in error messages.
+                     * Now we have a specific prop for that purpose, but some callers still use it.
+                     * TODO: update callers that uses "content" to not do this...
+                     * we should remove "content" all together in favor of the more specific props
+                     */}
+                    {content && (
+                        <Column fullWidth style={style.contentMaxHeight}>
+                            {content}
+                        </Column>
+                    )}
+                    {setNotes && (
+                        <View style={style.notesContainer}>
+                            <NotesInput
+                                label={notesLabel}
+                                notes={notes}
+                                setNotes={setNotes}
+                                isOptional={notesOptional}
+                            />
+                        </View>
+                    )}
+                </>
+            }
+        />
     )
 }
 
-const styles = (theme: Theme, width: number) =>
+const styles = (theme: Theme) =>
     StyleSheet.create({
-        amounts: {
-            paddingHorizontal: theme.spacing.lg,
-        },
         primaryAmount: {
             flexDirection: 'row',
             alignItems: 'flex-end',
@@ -309,10 +270,6 @@ const styles = (theme: Theme, width: number) =>
         },
         clickableSuggestion: {
             textDecorationLine: 'underline',
-        },
-        numpad: {
-            maxWidth: Math.min(400, width),
-            paddingHorizontal: theme.spacing.lg,
         },
         notesContainer: {
             width: '100%',
