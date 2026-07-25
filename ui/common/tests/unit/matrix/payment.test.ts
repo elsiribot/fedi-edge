@@ -521,6 +521,50 @@ describe('useMatrixPaymentTransaction USDT ecash verification', () => {
         expect(result.current.transaction).toBeNull()
     })
 
+    // Documents current, BTC-parity behavior: while verification is in flight
+    // (parseEcash unresolved), the hook must not surface any amount as
+    // "verified"; `verifiedAmountMicros` stays null so the caller falls back
+    // to the sender-declared amount for display, exactly as the BTC branch
+    // falls back to the event body while its transaction fetch is pending.
+    it('leaves verifiedAmountMicros null while verification is still pending, so display falls back to the declared amount', async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+        )
+
+        // Never resolves — verification stays in flight for the whole test.
+        const mockFedimint = createMockFedimintBridge({
+            parseEcash: () => new Promise(() => {}),
+        })
+
+        const event = createMockPaymentEvent({
+            content: {
+                unit: 'usdt',
+                status: 'pushed',
+                amount: 1_000_000_000,
+                ecash: 'mock-ecash-token',
+                senderId: 'npub1sender',
+                recipientId: 'npub1recipient',
+                federationId: 'fed123',
+            },
+        })
+
+        const { result } = renderHookWithState(
+            () => useMatrixPaymentTransaction({ event }),
+            store,
+            mockFedimint,
+        )
+
+        await waitFor(() => {
+            expect(result.current.isLoading).toBe(true)
+        })
+
+        // pending — nothing verified yet, so no NUMBER is claimed as verified
+        // (the initial `undefined`); the caller therefore falls back to the
+        // sender-declared amount for display.
+        expect(typeof result.current.verifiedAmountMicros).not.toBe('number')
+    })
+
     it('does not treat the declared amount as verified when validation fails (e.g. offline)', async () => {
         const store = setupStore()
         store.dispatch(

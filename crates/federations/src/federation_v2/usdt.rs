@@ -304,7 +304,16 @@ impl FederationV2 {
         }
         let spend_guard = self.spend_guard.lock().await;
         let balance = self.client.get_balance_for_unit(USDT_UNIT).await?;
-        if amount.0 > balance.msats {
+        // `mintv2.send` rounds the spend UP to the next multiple of the
+        // smallest client denomination (512 msats = 2^9; see
+        // fedimint-mintv2-client's `round_to_multiple` over
+        // `client_denominations()`). Validate against that POST-rounding
+        // amount, not the raw request, so a near-full-balance send fails this
+        // friendly guard here rather than deep inside `send` once the rounding
+        // pushes it over balance.
+        const MINTV2_MIN_DENOMINATION_MSATS: u64 = 512;
+        let rounded_amount = amount.0.next_multiple_of(MINTV2_MIN_DENOMINATION_MSATS);
+        if rounded_amount > balance.msats {
             bail!(ErrorCode::InsufficientBalance(RpcAmount(balance)));
         }
         let custom_meta = serde_json::to_value(EcashSendMetadata {

@@ -826,12 +826,28 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
         usdt_send.0,
         usdt_txns.iter().map(|tx| tx.amount.0).collect::<Vec<_>>()
     );
+    // Structural (not amount-coincidence) BTC-absence check: assert the USDT
+    // history contains EXACTLY the USDT e-cash ops we performed above and no
+    // more — 3 sends (usdt_generate_ecash at the initial send, the generic-
+    // receive setup, and the with-invite send) and 2 receives (usdt_receive_
+    // ecash + the generic receive_ecash of a USDT note). A leaked BITCOIN-unit
+    // mintv2 op would surface here as an extra EcashSend/EcashReceive row
+    // regardless of its msats, so pinning the per-kind counts proves BTC ops
+    // are absent by operation kind/identity, not merely because their amount
+    // failed to coincide with a USDT micro amount.
+    let usdt_send_count = usdt_txns
+        .iter()
+        .filter(|tx| matches!(tx.kind, RpcUsdtTransactionKind::EcashSend))
+        .count();
+    let usdt_receive_count = usdt_txns
+        .iter()
+        .filter(|tx| matches!(tx.kind, RpcUsdtTransactionKind::EcashReceive))
+        .count();
     ensure!(
-        !usdt_txns
-            .iter()
-            .any(|tx| tx.amount.0 == btc_send_amount.msats),
-        "USDT history must not contain the BTC op amount ({} msats)",
-        btc_send_amount.msats
+        usdt_send_count == 3 && usdt_receive_count == 2,
+        "USDT history must contain exactly the 3 USDT e-cash sends and 2 \
+         receives performed above (no leaked BITCOIN mintv2 ops), got \
+         {usdt_send_count} sends and {usdt_receive_count} receives: {usdt_txns:?}"
     );
 
     // --- Assertion 7: cancel a generated USDT ecash -> USDT restored, BTC

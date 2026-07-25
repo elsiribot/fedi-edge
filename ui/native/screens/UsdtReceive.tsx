@@ -33,7 +33,7 @@ const UsdtReceive: React.FC<Props> = () => {
     const fedimint = useFedimint()
     const dispatch = useAppDispatch()
     const formatUsdt = useFormatUsdtMicros()
-    const { amountInput, setAmountInput, amountMicros, decimalSeparator } =
+    const { amountInput, setAmountInput, setAmountFromMicros, amountMicros } =
         useUsdtAmountInput()
 
     const federation = useAppSelector(selectPaymentFederation)
@@ -101,14 +101,7 @@ const UsdtReceive: React.FC<Props> = () => {
     }, [address, federationId, fedimint, dispatch])
 
     const handleEditRequestAmount = () => {
-        setAmountInput(
-            requestedMicros
-                ? microsToDecimalString(requestedMicros).replace(
-                      '.',
-                      decimalSeparator,
-                  )
-                : '',
-        )
+        setAmountFromMicros(requestedMicros)
         setIsEnteringAmount(true)
     }
 

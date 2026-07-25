@@ -1571,7 +1571,6 @@
             "withdrawal": "Withdrawal",
             "ecash-sent": "Ecash sent",
             "ecash-received": "Ecash received",
-            "ecash-detected": "This is ecash — claiming instead",
             "request-amount": "Request amount",
             "requesting-amount": "Requesting: {{amount}}",
             "deposit-address": "Deposit address",

@@ -54,6 +54,8 @@ impl MintOpsRouter {
             .get_operation(operation_id)
             .await
             .map(|op| op.operation_module_kind() == MINTV2_OPERATION_TYPE)
+            // A missing op-log entry means "not a mintv2 op": callers fall back
+            // to the v1 (mintv1) path, which is a safe no-op for an unknown id.
             .unwrap_or(false)
     }
 }

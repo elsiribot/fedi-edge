@@ -1647,6 +1647,11 @@ export const sendMatrixPaymentPush = createAsyncThunk<
             // every caller just for this message body.
             body = `Sent payment of ${formatUsdtMicros(amount)}. Use the Fedi app to accept this payment.` // TODO: i18n? this only shows to matrix clients, not Fedi users
 
+            // Refresh here — right after `usdtGenerateEcash` — is deliberate:
+            // the ecash was already debited from balance at that call (above),
+            // so refreshing now reflects the debit even if the `sendMessage`
+            // below later throws. Placing it after `sendMessage` would leave a
+            // stale (too-high) balance on that failure path.
             dispatch(refreshUsdtBalance({ fedimint, federationId }))
         } else {
             log.info('sendMatrixPaymentPush', amount, 'sats')
@@ -1709,7 +1714,7 @@ export const sendMatrixPaymentRequest = createAsyncThunk<
     },
     { state: CommonState }
 >(
-    'matrix/sendMatrixDirectPaymentRequestMessage',
+    'matrix/sendMatrixPaymentRequest',
     async (
         { fedimint, federationId, roomId, amount, unit = 'bitcoin' },
         { getState },

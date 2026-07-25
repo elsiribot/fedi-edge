@@ -268,6 +268,37 @@ describe('useMatrixRoomPreview', () => {
             isPublicBroadcast: null,
         })
     })
+
+    // A payment preview denominated in a unit this app version doesn't
+    // understand ('other' -> getPaymentUnit 'unsupported') must show the
+    // dedicated unsupported string, never a (misleading) formatted amount.
+    it('renders the unsupported-payment-unit string for a payment preview with an unrecognized unit', () => {
+        const roomId = '!room:example.com'
+        const t = createMockT()
+
+        addMatrixRoomToStore(store, {
+            ...MOCK_MATRIX_ROOM,
+            id: roomId,
+            preview: createMockPaymentEvent({
+                roomId,
+                content: {
+                    unit: 'other',
+                    amount: 1000,
+                    senderId: 'npub1sender',
+                    recipientId: 'npub1recipient',
+                },
+            }) as unknown as NonNullable<MatrixRoom['preview']>,
+        })
+
+        const { result } = renderHookWithState(
+            () => useMatrixRoomPreview({ roomId, t }),
+            store,
+        )
+
+        expect(result.current.text).toBe(
+            'feature.chat.unsupported-payment-unit',
+        )
+    })
 })
 
 describe('useChatsListSearch', () => {

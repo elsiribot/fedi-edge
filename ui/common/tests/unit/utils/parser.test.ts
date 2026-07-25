@@ -452,4 +452,19 @@ describe('parseUserInput', () => {
         // Malformed URI — parses as neither EVM nor anything else
         expect(parsed.type).not.toEqual(ParserDataType.EvmAddress)
     })
+
+    it('does not parse a 64-hex (txid-like) string as an EVM address', async () => {
+        // A 32-byte value (e.g. a transaction id) is 64 hex chars — twice the
+        // 40 hex chars of a 20-byte EVM address. Even with an `0x` prefix it
+        // must never be mistaken for a USDT recipient.
+        const txidLike = '0x' + 'ab'.repeat(32)
+        const parsed = await parseUserInput(
+            txidLike,
+            fedimint,
+            t,
+            mockFedId,
+            false,
+        )
+        expect(parsed.type).not.toEqual(ParserDataType.EvmAddress)
+    })
 })

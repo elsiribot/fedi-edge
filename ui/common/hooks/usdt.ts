@@ -92,6 +92,22 @@ export const useUsdtAmountInput = (opts?: {
             : '',
     )
 
+    // Reseed the field from a micros amount (e.g. re-entering a previously
+    // requested amount), applying the same locale-aware formatting the
+    // `initialMicros` prefill uses. Falsy/zero clears the field.
+    const setAmountFromMicros = useCallback(
+        (micros: number | null) =>
+            setAmountInput(
+                micros
+                    ? microsToDecimalString(micros).replace(
+                          '.',
+                          decimalSeparator,
+                      )
+                    : '',
+            ),
+        [decimalSeparator],
+    )
+
     const balanceMicros = opts?.balanceMicros ?? 0
 
     // `parseUsdtInput` tolerates a transient trailing decimal separator
@@ -118,6 +134,7 @@ export const useUsdtAmountInput = (opts?: {
     return {
         amountInput,
         setAmountInput,
+        setAmountFromMicros,
         amountMicros,
         isPositiveAmount,
         hasInsufficientBalance,

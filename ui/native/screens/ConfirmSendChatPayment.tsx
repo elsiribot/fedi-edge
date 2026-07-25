@@ -101,6 +101,9 @@ const ConfirmSendChatPaymentInner: React.FC<{
     const { feeBreakdownTitle, ecashFeesGuidanceText, makeEcashFeeContent } =
         useFeeDisplayUtils(t, paymentFederation?.id || '')
     const amountMsats = amountUtils.satToMsat(btcAmount)
+    // Called unconditionally (hook rules): for a USDT payment `btcAmount`
+    // defaults to 0, so `amountMsats` is 0 and this suppresses the fee-details
+    // RPC (USDT ecash carries no Fedi fees).
     const feeDetails = useEcashFeeDetails(amountMsats, paymentFederation?.id)
     const { formattedTotalFee, feeItemsBreakdown, formattedTotalAmount } =
         makeEcashFeeContent(amountMsats, feeDetails)

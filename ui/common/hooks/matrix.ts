@@ -1533,6 +1533,8 @@ export function useMatrixPaymentTransaction({
                 setError(null)
 
                 try {
+                    // `parseEcash` is the bridge RPC (Rust-side
+                    // `validate_ecash`); logs/tests may say "validate".
                     const info = await fedimint.parseEcash(ecash)
                     setVerifiedAmountMicros(info.amount)
                     log.debug(
