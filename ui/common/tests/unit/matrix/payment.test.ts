@@ -2,9 +2,15 @@ import { waitFor } from '@testing-library/react'
 import { TFunction } from 'i18next'
 
 import { useMatrixPaymentTransaction } from '../../../hooks/matrix'
-import { claimMatrixPayment, setMatrixAuth, setupStore } from '../../../redux'
+import {
+    claimMatrixPayment,
+    setMatrixAuth,
+    setupStore,
+    tryReclaimMatrixPayment,
+} from '../../../redux'
 import { MatrixAuth, MatrixPaymentEvent, MatrixRoom } from '../../../types'
 import { RpcTimelineEventItemId } from '../../../types/bindings'
+import { BridgeError } from '../../../utils/errors'
 import {
     consolidatePaymentEvents,
     makeMatrixPaymentText,
@@ -510,5 +516,180 @@ describe('claimMatrixPayment USDT redeemed amount', () => {
 
         expect(consolidated.content.amount).toBe(redeemedAmountMicros)
         expect(consolidated.content.amount).not.toBe(1_000_000_000)
+    })
+})
+
+/*
+// USDT Reclaim Guard Tests
+// Business Context: `tryReclaimMatrixPayment` is dispatched by the debounced
+// timeline listener (`checkForReceivablePayments`) any time a rejected
+// payment is seen, and its `.catch` frees the paymentId for retry on any
+// thrown error. If the USDT notes were already redeemed back to us in a
+// prior session (e.g. the app restarted before persisting that fact), the
+// bridge's in-memory "already spent" tracking makes every retry fail
+// forever, spamming failed bridge redeems on every poll. The bridge signals
+// this specific case as a plain rejection message (no ErrorCode) from
+// `usdt_receive_ecash` in crates/federations/src/federation_v2/usdt.rs:348 —
+// "e-cash was rejected (possibly already spent)" — which must be treated as
+// a successful reclaim, while other (e.g. transport) errors must still be
+// rethrown so the payment remains eligible for retry.
+*/
+describe('tryReclaimMatrixPayment USDT reclaim guard', () => {
+    const buildRejectedUsdtEvent = () =>
+        createMockPaymentEvent({
+            content: {
+                unit: 'usdt',
+                status: 'rejected',
+                amount: 1_000_000,
+                ecash: 'mock-ecash-token',
+                federationId: 'fed123',
+                senderOperationId: 'sender-op-123',
+                senderId: 'npub1sender',
+                recipientId: 'npub1recipient',
+            },
+        })
+
+    it('treats an already-spent rejection from usdtReceiveEcash as a successful reclaim, so the retry guard never re-attempts it', async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+        )
+
+        const alreadySpentError = new BridgeError({
+            error: 'e-cash was rejected (possibly already spent)',
+            detail: 'e-cash was rejected (possibly already spent)',
+            errorCode: null,
+        })
+
+        const usdtReceiveEcash = jest.fn().mockRejectedValue(alreadySpentError)
+        const fedimint = {
+            usdtReceiveEcash,
+            usdtBalance: jest.fn().mockResolvedValue(0),
+        } as any
+
+        const event = buildRejectedUsdtEvent()
+
+        // resolves (does not throw) even though the bridge call rejected
+        await expect(
+            store
+                .dispatch(tryReclaimMatrixPayment({ fedimint, event }))
+                .unwrap(),
+        ).resolves.toBeUndefined()
+
+        expect(usdtReceiveEcash).toHaveBeenCalledTimes(1)
+
+        // This mirrors the exact guard `checkForReceivablePayments` runs
+        // around every dispatch of `tryReclaimMatrixPayment` (see
+        // ui/common/redux/matrix.ts: the `reclaimablePayments.forEach`
+        // block): add the paymentId to a shared Set before dispatching, and
+        // only delete it (permitting a retry) if the thunk's `.unwrap()`
+        // rejects. Because our fixed thunk does NOT reject for the
+        // already-spent case, the guard keeps the paymentId marked handled
+        // forever, so a second poll of the same rejected event dispatches
+        // nothing further.
+        const receivedPayments = new Set<string>()
+        const attemptReclaim = async () => {
+            if (receivedPayments.has(event.content.paymentId)) return
+            receivedPayments.add(event.content.paymentId)
+            await store
+                .dispatch(tryReclaimMatrixPayment({ fedimint, event }))
+                .unwrap()
+                .catch(() => {
+                    receivedPayments.delete(event.content.paymentId)
+                })
+        }
+
+        await attemptReclaim() // 2nd usdtReceiveEcash call, guard now holds the id
+        await attemptReclaim() // guarded — must NOT call usdtReceiveEcash again
+
+        expect(usdtReceiveEcash).toHaveBeenCalledTimes(2)
+    })
+
+    it('rethrows a non-already-spent (transport) error so the payment remains eligible for retry', async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+        )
+
+        const transportError = new BridgeError({
+            error: 'network request failed',
+            detail: 'network request failed',
+            errorCode: null,
+        })
+
+        const usdtReceiveEcash = jest.fn().mockRejectedValue(transportError)
+        const fedimint = {
+            usdtReceiveEcash,
+            usdtBalance: jest.fn().mockResolvedValue(0),
+        } as any
+
+        const event = buildRejectedUsdtEvent()
+
+        // RTK's `.unwrap()` throws the serialized error (a plain object,
+        // not an `Error` instance), so `.rejects.toThrow()` can't recognize
+        // it — same reason `tests/unit/redux/wallet.test.ts` uses
+        // `.rejects.toBeDefined()` for the equivalent BTC-side assertion.
+        await expect(
+            store
+                .dispatch(tryReclaimMatrixPayment({ fedimint, event }))
+                .unwrap(),
+        ).rejects.toBeDefined()
+
+        expect(usdtReceiveEcash).toHaveBeenCalledTimes(1)
+    })
+})
+
+// BUSINESS: the BTC reclaim path must keep its existing tolerance — a failed
+// `cancelEcash` (e.g. notes already reclaimed in a prior session) must not
+// make `tryReclaimMatrixPayment` throw, since `checkForReceivablePayments`
+// would otherwise free the paymentId and retry forever, same as the USDT bug
+// this change fixes. This is a regression guard: the BTC branch dispatches
+// `cancelEcash` without awaiting/unwrapping it, so it was already immune to
+// this pattern before this change — this test only verifies that stays true.
+describe('tryReclaimMatrixPayment BTC reclaim path (untouched by this change)', () => {
+    it('resolves without throwing even when the underlying cancelEcash bridge call fails', async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+        )
+
+        const cancelEcashError = new BridgeError({
+            error: 'Ecash cancel failed, the e-cash notes have been spent by someone else already',
+            detail: 'Ecash cancel failed, the e-cash notes have been spent by someone else already',
+            errorCode: 'ecashCancelFailed',
+        })
+
+        const cancelEcash = jest.fn().mockRejectedValue(cancelEcashError)
+        const parseEcash = jest.fn().mockResolvedValue({
+            federation_type: 'joined',
+            federation_id: 'fed123',
+            amount: 1000,
+        })
+        const getTransaction = jest.fn().mockResolvedValue({ kind: 'oobSend' })
+        const fedimint = {
+            cancelEcash,
+            parseEcash,
+            getTransaction,
+        } as any
+
+        const event = createMockPaymentEvent({
+            content: {
+                status: 'rejected',
+                amount: 1000,
+                ecash: 'mock-ecash-token',
+                federationId: 'fed123',
+                senderOperationId: 'sender-op-123',
+                senderId: 'npub1sender',
+                recipientId: 'npub1recipient',
+            },
+        })
+
+        await expect(
+            store
+                .dispatch(tryReclaimMatrixPayment({ fedimint, event }))
+                .unwrap(),
+        ).resolves.toBeUndefined()
+
+        expect(getTransaction).toHaveBeenCalledWith('fed123', 'sender-op-123')
     })
 })

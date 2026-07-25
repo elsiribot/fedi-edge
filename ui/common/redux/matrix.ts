@@ -85,6 +85,7 @@ import {
     getDefaultGroupChats,
     shouldShowInviteCode,
 } from '../utils/FederationUtils'
+import { BridgeError } from '../utils/errors'
 import { FedimintBridge } from '../utils/fedimint'
 import { makeLog } from '../utils/log'
 import {
@@ -1884,10 +1885,43 @@ export const tryReclaimMatrixPayment = createAsyncThunk<
                 event.content.senderOperationId,
             )
             // USDT notes are reclaimed by redeeming them back ourselves
-            await fedimint.usdtReceiveEcash(
-                event.content.ecash,
-                event.content.federationId,
-            )
+            try {
+                await fedimint.usdtReceiveEcash(
+                    event.content.ecash,
+                    event.content.federationId,
+                )
+            } catch (err) {
+                // If we already reclaimed these notes in a previous session
+                // (e.g. the app restarted before `receivedPayments` — the
+                // in-memory guard in `checkForReceivablePayments` — could
+                // record it), the bridge's `mintv2.receive` rejects the
+                // already-spent note and `usdt_receive_ecash` (see
+                // crates/federations/src/federation_v2/usdt.rs, the
+                // `MintV2FinalReceiveOperationState::Rejected` arm) bails
+                // with the plain string "e-cash was rejected (possibly
+                // already spent)". Unlike the legacy mintv1 receive path
+                // (rpc-types `ErrorCode::EcashAlreadySpent`, matched via
+                // `errorCode` in `wallet.ts`'s `receiveEcash` thunk), this
+                // bail! isn't tagged with an `ErrorCode`, so it only
+                // surfaces to JS as `BridgeError.error` text — match on
+                // that exact string. Treating it as success (not
+                // rethrowing) keeps this paymentId marked handled in
+                // `checkForReceivablePayments`, so the debounced timeline
+                // listener stops re-attempting it. Any other error (e.g.
+                // a genuine transport failure) is rethrown so the payment
+                // stays eligible for retry.
+                if (
+                    err instanceof BridgeError &&
+                    err.error === 'e-cash was rejected (possibly already spent)'
+                ) {
+                    log.info(
+                        'USDT payment already reclaimed in a previous session, treating as success:',
+                        event.content.senderOperationId,
+                    )
+                } else {
+                    throw err
+                }
+            }
             dispatch(
                 refreshUsdtBalance({
                     fedimint,
