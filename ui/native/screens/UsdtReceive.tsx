@@ -126,11 +126,15 @@ const UsdtReceive: React.FC<Props> = () => {
     }
 
     // Machine format only - URIs never carry locale-formatted amounts.
-    // `fullString` (share text) carries the amount request when present;
-    // `body` (QR value + copy-to-clipboard) is always the bare address so
-    // pasting it elsewhere (e.g. an exchange withdrawal field) never hands
-    // over a URI with query params. Mirrors OnchainReceiveQr's BtcLnUri
-    // split, where `body` never carries the scheme/params either.
+    // Actual contract (this screen only — OnchainReceiveQr has no
+    // amount-request feature, so it isn't precedent here): `body`
+    // (copy-to-clipboard + the truncated caption) is always the bare
+    // `0x…` address, so pasting it elsewhere (e.g. an exchange withdrawal
+    // field) never hands over a URI with query params. `requestUri` feeds
+    // both the on-screen QR (via `qrValue`) and `fullString` (Share), and
+    // carries the amount request — `ethereum:<address>?amount=<amount>` —
+    // whenever one is set, so scanning the QR prefills the sender's amount
+    // step (see UsdtSend.tsx's `ethereum:` URI parsing).
     const requestUri =
         address && requestedMicros
             ? `ethereum:${address}?amount=${microsToDecimalString(requestedMicros)}`
@@ -164,6 +168,7 @@ const UsdtReceive: React.FC<Props> = () => {
                         fullString: requestUri,
                         body: address ?? '',
                     }}
+                    qrValue={requestUri}
                     isLoading={!address}>
                     <Column gap="sm">
                         <Pressable

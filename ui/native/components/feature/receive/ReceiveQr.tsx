@@ -24,12 +24,20 @@ export type ReceiveQrProps = {
     uri: BtcLnUri | { fullString: string; body: string }
     isLoading?: boolean
     children?: React.ReactNode
+    /**
+     * Overrides the value encoded in the on-screen QR code. Defaults to
+     * `uri.body`. Use this when the QR needs to carry more than the copy
+     * value does (e.g. a request URI with an amount param), while `uri.body`
+     * still drives Copy and the truncated address caption below the QR.
+     */
+    qrValue?: string
 }
 
 const ReceiveQr: React.FC<ReceiveQrProps> = ({
     uri,
     children,
     isLoading = false,
+    qrValue,
 }: ReceiveQrProps) => {
     const { theme } = useTheme()
     const { t } = useTranslation()
@@ -81,7 +89,7 @@ const ReceiveQr: React.FC<ReceiveQrProps> = ({
                                 <ActivityIndicator />
                             ) : (
                                 <QRCode
-                                    value={uri.body}
+                                    value={qrValue ?? uri.body}
                                     size={qrAbsoluteSize}
                                 />
                             )}
