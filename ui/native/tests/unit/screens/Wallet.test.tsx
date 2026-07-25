@@ -8,6 +8,7 @@ import {
 
 import {
     fetchCurrencyPrices,
+    refreshUsdtBalance,
     setFederations,
     setIsInternetUnreachable,
     setPaymentType,
@@ -256,6 +257,54 @@ describe('Wallet screen', () => {
             expect(mockNavigation.navigate).toHaveBeenCalledWith(
                 'ReceiveBitcoin',
                 {},
+            )
+        })
+
+        it('[usdt federation] should navigate to UsdtSend when online and UsdtSendOfflineAmount when offline', async () => {
+            const usdtFederation = {
+                ...mockFederation1,
+                id: 'usdt-fed',
+                clientConfig: {
+                    global: {},
+                    modules: {
+                        usdt: { kind: 'usdt' },
+                    },
+                },
+            } as LoadedFederation
+
+            store.dispatch(setFederations([usdtFederation]))
+            store.dispatch(setSelectedFederationId(usdtFederation.id))
+            // Give the federation a positive USDT balance so the Send
+            // button isn't disabled (useWalletButtons requires
+            // usdtBalanceMicros > 0 for the usdt payment type).
+            store.dispatch({
+                type: refreshUsdtBalance.fulfilled.type,
+                payload: 1_000_000,
+                meta: { arg: { federationId: usdtFederation.id } },
+            })
+            renderWithProviders(
+                <Wallet
+                    route={{
+                        name: 'Wallet',
+                        key: 'Wallet',
+                    }}
+                    navigation={mockNavigation as any}
+                />,
+                { store },
+            )
+
+            const sendButton = screen.getByText(i18n.t('words.send'))
+
+            await user.press(sendButton)
+            expect(mockNavigation.navigate).toHaveBeenCalledWith('UsdtSend')
+
+            // When offline, the usdt Send button should bypass UsdtSend
+            // (the omni-input scanner) entirely and lead straight to
+            // UsdtSendOfflineAmount, mirroring the bitcoin branch above.
+            act(() => store.dispatch(setIsInternetUnreachable(true)))
+            await user.press(sendButton)
+            expect(mockNavigation.navigate).toHaveBeenCalledWith(
+                'UsdtSendOfflineAmount',
             )
         })
 

@@ -125,7 +125,12 @@ const UsdtReceive: React.FC<Props> = () => {
         setIsEnteringAmount(false)
     }
 
-    // Machine format only - URIs never carry locale-formatted amounts
+    // Machine format only - URIs never carry locale-formatted amounts.
+    // `fullString` (share text) carries the amount request when present;
+    // `body` (QR value + copy-to-clipboard) is always the bare address so
+    // pasting it elsewhere (e.g. an exchange withdrawal field) never hands
+    // over a URI with query params. Mirrors OnchainReceiveQr's BtcLnUri
+    // split, where `body` never carries the scheme/params either.
     const requestUri =
         address && requestedMicros
             ? `ethereum:${address}?amount=${microsToDecimalString(requestedMicros)}`
@@ -157,7 +162,7 @@ const UsdtReceive: React.FC<Props> = () => {
                 <ReceiveQr
                     uri={{
                         fullString: requestUri,
-                        body: requestUri,
+                        body: address ?? '',
                     }}
                     isLoading={!address}>
                     <Column gap="sm">

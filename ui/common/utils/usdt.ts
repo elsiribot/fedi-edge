@@ -4,7 +4,7 @@
  * USDT amounts are represented in "micros" (10^-6 USDT), so
  * 1 USDT = 1_000_000 micros.
  */
-
+import type { RpcUsdtWithdrawalStatus } from '../types/bindings'
 import amountUtils from './AmountUtils'
 
 export const USDT_MICROS_PER_USDT = 1_000_000
@@ -146,7 +146,10 @@ export function parseUsdtInput(
     opts: { decimalSeparator?: string; groupingSeparator?: string } = {},
 ): number | null {
     // Strip surrounding whitespace and a trailing currency symbol/suffix
-    let trimmed = input.trim().replace(/\s*USDT\s*$/i, '').trim()
+    let trimmed = input
+        .trim()
+        .replace(/\s*USDT\s*$/i, '')
+        .trim()
     if (trimmed === '') return null
 
     if (opts.decimalSeparator) {
@@ -280,4 +283,42 @@ export function parseUsdtRecipientInput(
     }
 
     return { address: candidate, amountMicros }
+}
+
+/** Withdrawal status types that will never change again. */
+function isTerminalUsdtWithdrawalStatus(
+    status: RpcUsdtWithdrawalStatus | undefined,
+): boolean {
+    return status?.type === 'confirmed' || status?.type === 'failed'
+}
+
+/**
+ * Selects which USDT withdrawal txids should have their status (re)fetched
+ * for a transaction-history screen's per-row badge.
+ *
+ * A txid is selected when it hasn't been fetched yet (absent from
+ * `alreadyFetchedTxids`), or its last known status in `statusByTxid` is
+ * still non-terminal (`unknown`/`queued`/`signing`/`submitted`, or no
+ * status at all). Once a withdrawal reaches a terminal status
+ * (`confirmed`/`failed`) it's never re-fetched again, even if the caller
+ * clears `alreadyFetchedTxids` (e.g. on pull-to-refresh) - so a manual
+ * refresh re-polls stuck-pending withdrawals without re-checking
+ * withdrawals that have already settled.
+ *
+ * `txids` may contain `null` (e.g. non-withdrawal transactions, or
+ * withdrawals whose txid hasn't been assigned yet) - these are skipped.
+ */
+export function selectUsdtTxidsToFetch(
+    txids: ReadonlyArray<string | null>,
+    statusByTxid: Readonly<Record<string, RpcUsdtWithdrawalStatus>>,
+    alreadyFetchedTxids: ReadonlySet<string>,
+): string[] {
+    const result: string[] = []
+    for (const txid of txids) {
+        if (!txid) continue
+        if (alreadyFetchedTxids.has(txid)) continue
+        if (isTerminalUsdtWithdrawalStatus(statusByTxid[txid])) continue
+        result.push(txid)
+    }
+    return result
 }

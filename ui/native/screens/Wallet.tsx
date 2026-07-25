@@ -89,7 +89,11 @@ const Wallet: React.FC<Props> = ({ navigation }) => {
         if (paymentType === 'stable-balance') {
             navigation.navigate('StabilitySend', { federationId })
         } else if (paymentType === 'usdt') {
-            navigation.navigate('UsdtSend')
+            if (isOffline) {
+                navigation.navigate('UsdtSendOfflineAmount')
+            } else {
+                navigation.navigate('UsdtSend')
+            }
         } else if (isOffline) {
             navigation.navigate('SendOfflineAmount')
         } else {

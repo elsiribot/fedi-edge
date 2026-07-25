@@ -20,6 +20,7 @@ import dateUtils from '@fedi/common/utils/DateUtils'
 import stringUtils from '@fedi/common/utils/StringUtils'
 import type { RpcUsdtTransaction } from '@fedi/common/utils/fedimint'
 import { makeLog } from '@fedi/common/utils/log'
+import { selectUsdtTxidsToFetch } from '@fedi/common/utils/usdt'
 
 import { HistoryIcon } from '../components/feature/transaction-history/HistoryIcon'
 import UsdtHistoryDetailOverlay, {
@@ -109,6 +110,11 @@ const UsdtHistory: React.FC<Props> = ({ route }: Props) => {
     const handleRefresh = useCallback(async () => {
         setIsRefreshing(true)
         try {
+            // Clear the "already fetched" cache so the status fan-out effect
+            // below reconsiders every current row - it still skips
+            // withdrawals whose last known status is terminal (confirmed/
+            // failed), so this only re-polls rows that are still pending.
+            fetchedTxidsRef.current.clear()
             await fetchTransactions()
         } catch (e) {
             toast.error(t, e)
@@ -132,15 +138,21 @@ const UsdtHistory: React.FC<Props> = ({ route }: Props) => {
         [federationId, fedimint],
     )
 
-    // Fetch each withdrawal's status once for the inline row badge
+    // Fetch each pending withdrawal's status for the inline row badge: once
+    // for a txid never seen before, and again after a pull-to-refresh
+    // clears `fetchedTxidsRef` - but only while its last known status isn't
+    // final, so a refresh doesn't re-fetch already-settled withdrawals.
     useEffect(() => {
-        for (const txn of transactions) {
-            const txid = getKindTxid(txn)
-            if (!txid || fetchedTxidsRef.current.has(txid)) continue
+        const txidsToFetch = selectUsdtTxidsToFetch(
+            transactions.map(getKindTxid),
+            statusByTxid,
+            fetchedTxidsRef.current,
+        )
+        for (const txid of txidsToFetch) {
             fetchedTxidsRef.current.add(txid)
             checkWithdrawalStatus(txid)
         }
-    }, [transactions, checkWithdrawalStatus])
+    }, [transactions, statusByTxid, checkWithdrawalStatus])
 
     // Poll the selected withdrawal's status while the detail overlay is open
     const selectedTxid = selectedTxn ? getKindTxid(selectedTxn) : null

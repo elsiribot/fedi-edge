@@ -1,3 +1,4 @@
+import type { RpcUsdtWithdrawalStatus } from '../../../types/bindings'
 import amountUtils from '../../../utils/AmountUtils'
 import {
     formatUsdtMicros,
@@ -5,6 +6,7 @@ import {
     microsToDecimalString,
     parseUsdtInput,
     parseUsdtRecipientInput,
+    selectUsdtTxidsToFetch,
     USDT_MICROS_PER_USDT,
 } from '../../../utils/usdt'
 
@@ -43,12 +45,12 @@ describe('usdt utils', () => {
         })
 
         it('formats using locale-specific grouping/decimal separators', () => {
-            expect(
-                formatUsdtMicros(1_234_560_000, { locale: 'de-DE' }),
-            ).toBe('1.234,56 USDT')
-            expect(
-                formatUsdtMicros(1_234_560_000, { locale: 'en-US' }),
-            ).toBe('1,234.56 USDT')
+            expect(formatUsdtMicros(1_234_560_000, { locale: 'de-DE' })).toBe(
+                '1.234,56 USDT',
+            )
+            expect(formatUsdtMicros(1_234_560_000, { locale: 'en-US' })).toBe(
+                '1,234.56 USDT',
+            )
         })
     })
 
@@ -57,9 +59,7 @@ describe('usdt utils', () => {
             expect(microsToDecimalString(0)).toBe('0.00')
             expect(microsToDecimalString(1_500_000)).toBe('1.50')
             expect(microsToDecimalString(1_234_567)).toBe('1.234567')
-            expect(microsToDecimalString(1_234_567_000_000)).toBe(
-                '1234567.00',
-            )
+            expect(microsToDecimalString(1_234_567_000_000)).toBe('1234567.00')
             expect(microsToDecimalString(-1_500_000)).toBe('-1.50')
         })
     })
@@ -95,12 +95,12 @@ describe('usdt utils', () => {
 
     describe('parseUsdtInput with a locale decimal separator', () => {
         it('treats the other separator as a grouping separator', () => {
-            expect(
-                parseUsdtInput('1,000', { decimalSeparator: '.' }),
-            ).toBe(1_000_000_000) // 1000 USDT in micros
-            expect(
-                parseUsdtInput('1,5', { decimalSeparator: ',' }),
-            ).toBe(1_500_000)
+            expect(parseUsdtInput('1,000', { decimalSeparator: '.' })).toBe(
+                1_000_000_000,
+            ) // 1000 USDT in micros
+            expect(parseUsdtInput('1,5', { decimalSeparator: ',' })).toBe(
+                1_500_000,
+            )
         })
 
         it('tolerates a trailing decimal separator', () => {
@@ -112,9 +112,7 @@ describe('usdt utils', () => {
         it('rejects ambiguous forms', () => {
             // comma isn't valid grouping (not a group of 3) and isn't the
             // decimal separator either
-            expect(
-                parseUsdtInput('1,5', { decimalSeparator: '.' }),
-            ).toBeNull()
+            expect(parseUsdtInput('1,5', { decimalSeparator: '.' })).toBeNull()
             expect(
                 parseUsdtInput('1.5.5', { decimalSeparator: '.' }),
             ).toBeNull()
@@ -287,6 +285,62 @@ describe('usdt utils', () => {
             expect(
                 parseUsdtRecipientInput(`ethereum:${address}?amount=%`),
             ).toBeNull()
+        })
+    })
+
+    describe('selectUsdtTxidsToFetch', () => {
+        const queued: RpcUsdtWithdrawalStatus = { type: 'queued' }
+        const confirmed: RpcUsdtWithdrawalStatus = {
+            type: 'confirmed',
+            block: 1,
+        }
+        const failed: RpcUsdtWithdrawalStatus = { type: 'failed', reason: 'x' }
+
+        it('selects txids never fetched before', () => {
+            expect(selectUsdtTxidsToFetch(['a', 'b'], {}, new Set())).toEqual([
+                'a',
+                'b',
+            ])
+        })
+
+        it('skips null txids (non-withdrawal transactions)', () => {
+            expect(
+                selectUsdtTxidsToFetch([null, 'a', null], {}, new Set()),
+            ).toEqual(['a'])
+        })
+
+        it('skips already-fetched txids whose status is still unknown', () => {
+            // Already attempted this session but no status came back yet -
+            // don't hammer the RPC again until a refresh clears the cache.
+            expect(selectUsdtTxidsToFetch(['a'], {}, new Set(['a']))).toEqual(
+                [],
+            )
+        })
+
+        it('re-selects an already-fetched txid once removed from the cache (pull-to-refresh) if still pending', () => {
+            expect(
+                selectUsdtTxidsToFetch(['a'], { a: queued }, new Set()),
+            ).toEqual(['a'])
+        })
+
+        it('never re-selects a txid whose last known status is terminal, even once removed from the cache', () => {
+            expect(
+                selectUsdtTxidsToFetch(
+                    ['a', 'b'],
+                    { a: confirmed, b: failed },
+                    new Set(),
+                ),
+            ).toEqual([])
+        })
+
+        it('mixes terminal and pending rows correctly', () => {
+            expect(
+                selectUsdtTxidsToFetch(
+                    ['pending', 'done', 'new'],
+                    { pending: queued, done: confirmed },
+                    new Set(),
+                ),
+            ).toEqual(['pending', 'new'])
         })
     })
 })
