@@ -767,6 +767,35 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
         "USDT e-cash must validate as unit `usdt`, got {usdt_parsed:?}"
     );
 
+    // --- Assertion 9: a USDT note generated with an embedded invite
+    // validates as NotJoined + unit `usdt` when parsed from a FRESH bridge
+    // that has never joined this federation. `unit` must come from the
+    // note's own self-describing field, not a joined-federation lookup
+    // (there is none here), and must not be conflated with `None`/Bitcoin. ---
+    let usdt_note_with_invite = federation
+        .usdt_generate_ecash(usdt_send, true, FrontendMetadata::default())
+        .await
+        .context("usdt_generate_ecash with invite failed")?;
+    let fresh_td = TestDevice::new().await?;
+    let fresh_bridge = fresh_td.bridge_full().await?;
+    let not_joined_parsed = fresh_bridge
+        .federations
+        .validate_ecash(usdt_note_with_invite.ecash.clone())
+        .await?;
+    ensure!(
+        matches!(
+            not_joined_parsed,
+            rpc_types::RpcEcashInfo::NotJoined {
+                unit: Some(rpc_types::RpcEcashUnit::Usdt),
+                federation_invite: Some(_),
+                ..
+            }
+        ),
+        "USDT e-cash validated from a fresh unjoined bridge must report \
+         federation_type = notJoined with unit = usdt and an embedded invite, \
+         got {not_joined_parsed:?}"
+    );
+
     // --- Assertion 6: usdtListTransactions contains the USDT sends/receives
     // with micro amounts and NOT the BTC ops ---
     let usdt_txns = federation.usdt_list_transactions(50, None).await?;

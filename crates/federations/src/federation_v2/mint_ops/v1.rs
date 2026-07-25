@@ -431,6 +431,8 @@ impl MintOps for MintOpsV1 {
                         RpcTransactionKind::OobReceive { state }
                     },
                     frontend_metadata: extra_meta.frontend_metadata,
+                    // v1 mint predates the unit concept; always Bitcoin.
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
             MintOperationMetaVariant::SpendOOB {
@@ -461,6 +463,8 @@ impl MintOps for MintOpsV1 {
                         oob_notes: Some(oob_notes.to_string()),
                     },
                     frontend_metadata: extra_meta.frontend_metadata,
+                    // v1 mint predates the unit concept; always Bitcoin.
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
         }

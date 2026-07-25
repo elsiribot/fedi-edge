@@ -314,6 +314,11 @@ impl MintOps for MintOpsV2 {
                         oob_notes: Some(ecash),
                     },
                     frontend_metadata: extra_meta.frontend_metadata,
+                    // Unit stamped on the op's own custom_meta at send time
+                    // (see `generate_ecash`/usdt send), not an instance
+                    // lookup — that can't distinguish historical ops in a
+                    // mixed BTC+USDT federation.
+                    unit: extra_meta.unit,
                 }))
             }
             MintV2OperationMeta::Receive {
@@ -350,6 +355,9 @@ impl MintOps for MintOpsV2 {
                         RpcTransactionKind::OobReceive { state }
                     },
                     frontend_metadata: extra_meta.frontend_metadata,
+                    // Unit stamped on the op's own custom_meta at receive
+                    // time — same rationale as the Send arm above.
+                    unit: extra_meta.unit,
                 }))
             }
             // Internal change-making op — hide from the tx list.

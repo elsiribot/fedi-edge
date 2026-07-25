@@ -89,8 +89,8 @@ use rpc_types::event::{Event, RecoveryProgressEvent, TypedEventExt};
 use rpc_types::matrix::RpcRoomId;
 use rpc_types::spv2_transfer_meta::Spv2TransferTxMeta;
 use rpc_types::{
-    FrontendMetadata, GuardianStatus, OperationFediFeeStatus, RpcAmount, RpcEventId, RpcFederation,
-    RpcFederationId, RpcFederationMaybeLoading, RpcFederationPreview, RpcFeeDetails,
+    FrontendMetadata, GuardianStatus, OperationFediFeeStatus, RpcAmount, RpcEcashUnit, RpcEventId,
+    RpcFederation, RpcFederationId, RpcFederationMaybeLoading, RpcFederationPreview, RpcFeeDetails,
     RpcGenerateEcashResponse, RpcGuardianRemittanceAccountInfo, RpcGuardianRemittanceDashboard,
     RpcJsonClientConfig, RpcLightningGateway, RpcLightningGatewayId, RpcOperationFediFeeStatus,
     RpcPayInvoiceResponse, RpcPeerId, RpcPrevPayInvoiceResult, RpcPublicKey,
@@ -227,6 +227,10 @@ pub(crate) struct FederationTransactionParts {
     pub amount: RpcAmount,
     pub kind: RpcTransactionKind,
     pub frontend_metadata: Option<FrontendMetadata>,
+    /// Unit this transaction is denominated in. Only mintv2 ecash
+    /// send/receive derive this from the operation's stamped custom_meta;
+    /// every other transaction kind is Bitcoin-denominated today.
+    pub unit: RpcEcashUnit,
 }
 
 macro_rules! log_update {
@@ -2531,6 +2535,10 @@ impl FederationV2 {
         let fedi_fee_msats = app_fedi_fee_msats + guardian_fedi_fee_msats;
         let outcome_time = entry.outcome_time();
         let (transaction_amount, transaction_kind, frontend_metadata);
+        // Non-mint transaction kinds (LN, onchain, stability pool) are all
+        // Bitcoin-denominated today; only mintv2 ecash send/receive can
+        // override this below with the unit stamped on the operation.
+        let mut transaction_unit = RpcEcashUnit::Bitcoin;
         match entry.operation_module_kind() {
             LIGHTNING_OPERATION_TYPE | LIGHTNINGV2_OPERATION_TYPE => {
                 let Some(transaction) = self
@@ -2543,6 +2551,7 @@ impl FederationV2 {
                 transaction_amount = transaction.amount;
                 frontend_metadata = transaction.frontend_metadata;
                 transaction_kind = transaction.kind;
+                transaction_unit = transaction.unit;
             }
             STABILITY_POOL_OPERATION_TYPE => match entry.meta() {
                 stability_pool_client_old::StabilityPoolMeta::Deposit { txid, amount, .. } => {
@@ -2899,6 +2908,7 @@ impl FederationV2 {
                 transaction_amount = transaction.amount;
                 frontend_metadata = transaction.frontend_metadata;
                 transaction_kind = transaction.kind;
+                transaction_unit = transaction.unit;
             }
             WALLET_OPERATION_TYPE | WALLETV2_OPERATION_TYPE => {
                 let Some(transaction) = self
@@ -2911,6 +2921,7 @@ impl FederationV2 {
                 transaction_amount = transaction.amount;
                 frontend_metadata = transaction.frontend_metadata;
                 transaction_kind = transaction.kind;
+                transaction_unit = transaction.unit;
             }
             _ => {
                 bail!(
@@ -2930,6 +2941,7 @@ impl FederationV2 {
             frontend_metadata,
             kind: transaction_kind,
             outcome_time: outcome_time.and_then(|x| to_unix_time(x).ok()),
+            unit: transaction_unit,
         }))
     }
 

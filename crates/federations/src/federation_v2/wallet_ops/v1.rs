@@ -7,8 +7,8 @@ use fedimint_wallet_client::{DepositStateV2, WithdrawState};
 use futures::StreamExt;
 use rpc_types::error::ErrorCode;
 use rpc_types::{
-    BaseMetadata, FrontendMetadata, RpcAmount, RpcFeeDetails, RpcTransactionDirection,
-    RpcTransactionKind,
+    BaseMetadata, FrontendMetadata, RpcAmount, RpcEcashUnit, RpcFeeDetails,
+    RpcTransactionDirection, RpcTransactionKind,
 };
 use tracing::{error, warn};
 
@@ -375,6 +375,7 @@ impl WalletOps for WalletOpsV1 {
                         state: outcome.map(Into::into),
                     },
                     frontend_metadata,
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
             fedimint_wallet_client::WalletOperationMetaVariant::Withdraw {
@@ -401,6 +402,7 @@ impl WalletOps for WalletOpsV1 {
                         state: outcome.map(Into::into),
                     },
                     frontend_metadata,
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
             fedimint_wallet_client::WalletOperationMetaVariant::RbfWithdraw { .. } => Ok(None),

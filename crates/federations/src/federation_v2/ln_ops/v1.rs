@@ -12,7 +12,7 @@ use futures::StreamExt;
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
 use rpc_types::error::ErrorCode;
 use rpc_types::{
-    BaseMetadata, FrontendMetadata, LightningSendMetadata, RpcAmount, RpcFeeDetails,
+    BaseMetadata, FrontendMetadata, LightningSendMetadata, RpcAmount, RpcEcashUnit, RpcFeeDetails,
     RpcLightningGateway, RpcLightningGatewayId, RpcPayInvoiceResponse, RpcPrevPayInvoiceResult,
     RpcTransactionDirection, RpcTransactionKind,
 };
@@ -648,6 +648,7 @@ impl LnOps for LnOpsV1 {
                         lightning_fees: RpcAmount(fee),
                         state: state.map(Into::into),
                     },
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
             LightningOperationMetaVariant::Receive { invoice, .. }
@@ -670,6 +671,7 @@ impl LnOps for LnOpsV1 {
                             .await?
                             .map(Into::into),
                     },
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
             LightningOperationMetaVariant::RecurringPaymentReceive(payment) => {
@@ -702,6 +704,7 @@ impl LnOps for LnOpsV1 {
                     kind: RpcTransactionKind::LnRecurringdReceive {
                         state: state.map(Into::into),
                     },
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
             #[allow(deprecated)]

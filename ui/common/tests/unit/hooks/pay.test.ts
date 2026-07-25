@@ -19,6 +19,7 @@ const buildNotJoinedEcash = (): RpcEcashInfo => ({
     federation_type: 'notJoined',
     federation_invite: 'invite-code',
     amount: 10000 as MSats,
+    unit: 'bitcoin',
 })
 
 const buildJoinedEcash = (): RpcEcashInfo => ({

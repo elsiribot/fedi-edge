@@ -306,6 +306,10 @@ pub enum RpcEcashInfo {
     NotJoined {
         federation_invite: Option<String>,
         amount: RpcAmount,
+        /// Unit stamped on the note itself, if any. `None` for legacy
+        /// unitless notes — the UI must render this as "unknown", never
+        /// assume Bitcoin/sats.
+        unit: Option<RpcEcashUnit>,
     },
 }
 
@@ -520,6 +524,11 @@ pub struct RpcTransaction {
     /// time when this operation was settled.
     #[ts(type = "number | null")]
     pub outcome_time: Option<u64>,
+    /// Unit this transaction is denominated in. Defaults to `Bitcoin` for
+    /// old bindings and for transaction kinds that don't stamp a unit
+    /// (everything except mintv2 ecash send/receive).
+    #[serde(default)]
+    pub unit: RpcEcashUnit,
 }
 
 #[derive(Debug, Deserialize, Serialize, TS)]

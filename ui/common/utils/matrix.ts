@@ -1056,6 +1056,7 @@ export const coerceMultispendTxn = (
             senderMatrixId: null,
         },
         outcomeTime: null,
+        unit: 'bitcoin' as const,
     }
     if (isMultispendDepositEvent(event)) {
         return {

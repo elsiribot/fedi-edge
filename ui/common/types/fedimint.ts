@@ -57,6 +57,7 @@ export type CommonTxnFields = Pick<
     | 'fediGuardianFeeStatus'
     | 'frontendMetadata'
     | 'outcomeTime'
+    | 'unit'
 >
 
 export type MultispendTransactionListEntry = CommonTxnFields & {

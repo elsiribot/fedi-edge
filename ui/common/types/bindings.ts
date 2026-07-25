@@ -578,6 +578,12 @@ export type RpcEcashInfo =
       federation_type: "notJoined";
       federation_invite: string | null;
       amount: RpcAmount;
+      /**
+       * Unit stamped on the note itself, if any. `None` for legacy
+       * unitless notes — the UI must render this as "unknown", never
+       * assume Bitcoin/sats.
+       */
+      unit: RpcEcashUnit | null;
     };
 
 /**
@@ -1631,6 +1637,12 @@ export type RpcTransaction = {
    * time when this operation was settled.
    */
   outcomeTime: number | null;
+  /**
+   * Unit this transaction is denominated in. Defaults to `Bitcoin` for
+   * old bindings and for transaction kinds that don't stamp a unit
+   * (everything except mintv2 ecash send/receive).
+   */
+  unit: RpcEcashUnit;
 } & (
   | {
       kind: "lnPay";
@@ -1743,6 +1755,12 @@ export type RpcTransactionListEntry = {
    * time when this operation was settled.
    */
   outcomeTime: number | null;
+  /**
+   * Unit this transaction is denominated in. Defaults to `Bitcoin` for
+   * old bindings and for transaction kinds that don't stamp a unit
+   * (everything except mintv2 ecash send/receive).
+   */
+  unit: RpcEcashUnit;
 } & (
   | {
       kind: "lnPay";

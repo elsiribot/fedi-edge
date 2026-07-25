@@ -69,6 +69,7 @@ export function makeTestTxnEntry<T extends TransactionListEntry['kind']>(
             senderMatrixId: null,
         },
         outcomeTime: null,
+        unit: 'bitcoin',
     }
 
     switch (kind) {

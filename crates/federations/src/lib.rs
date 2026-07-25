@@ -295,6 +295,12 @@ impl Federations {
             return Ok(RpcEcashInfo::NotJoined {
                 federation_invite: v2_ecash.invite().map(|invite| invite.to_string()),
                 amount,
+                // Authoritative unit stamped on the note itself; `None` for
+                // legacy unitless notes. Unlike the Joined arm above, there
+                // is no joined federation to fall back to here.
+                unit: v2_ecash
+                    .unit()
+                    .map(crate::federation_v2::usdt::rpc_ecash_unit),
             });
         }
 
@@ -309,6 +315,8 @@ impl Federations {
             None => Ok(RpcEcashInfo::NotJoined {
                 federation_invite: oob.federation_invite().map(|invite| invite.to_string()),
                 amount: RpcAmount(oob.total_amount()),
+                // v1 OOBNotes predate the unit concept entirely.
+                unit: None,
             }),
         }
     }

@@ -19,6 +19,7 @@ const MOCK_TRANSACTION: RpcTransaction = {
         senderMatrixId: null,
     },
     outcomeTime: Date.now(),
+    unit: 'bitcoin',
     kind: 'lnReceive' as const,
     ln_invoice: 'lnbc123',
     state: { type: 'claimed' } as RpcLnReceiveState,

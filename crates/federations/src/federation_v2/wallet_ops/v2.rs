@@ -10,7 +10,7 @@ use fedimint_walletv2_client::{
 };
 use rpc_types::error::ErrorCode;
 use rpc_types::{
-    FrontendMetadata, RpcAmount, RpcFeeDetails, RpcOnchainDepositState,
+    FrontendMetadata, RpcAmount, RpcEcashUnit, RpcFeeDetails, RpcOnchainDepositState,
     RpcOnchainDepositTransactionData, RpcOnchainWithdrawState, RpcTransactionDirection,
     RpcTransactionKind,
 };
@@ -311,6 +311,7 @@ impl WalletOps for WalletOpsV2 {
                         state,
                     },
                     frontend_metadata: None,
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
             WalletOperationMeta::Receive(meta) => {
@@ -391,6 +392,7 @@ impl WalletOps for WalletOpsV2 {
                         state: Some(state),
                     },
                     frontend_metadata: None,
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
         }

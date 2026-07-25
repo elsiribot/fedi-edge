@@ -12,7 +12,7 @@ use fedimint_lnv2_client::{
 use lightning_invoice::{Bolt11Invoice, RoutingFees};
 use rpc_types::error::ErrorCode;
 use rpc_types::{
-    BaseMetadata, FrontendMetadata, LightningSendMetadata, RpcAmount, RpcFeeDetails,
+    BaseMetadata, FrontendMetadata, LightningSendMetadata, RpcAmount, RpcEcashUnit, RpcFeeDetails,
     RpcLightningGateway, RpcLightningGatewayId, RpcPayInvoiceResponse, RpcPrevPayInvoiceResult,
     RpcTransactionDirection, RpcTransactionKind,
 };
@@ -481,6 +481,7 @@ impl LnOps for LnOpsV2 {
                         lightning_fees: RpcAmount(gateway_fee),
                         state: state.map(Into::into),
                     },
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
             LnV2OperationMeta::Receive(LnV2ReceiveOperationMeta {
@@ -530,6 +531,7 @@ impl LnOps for LnOpsV2 {
                         ln_invoice: invoice_str,
                         state: state.map(Into::into),
                     },
+                    unit: RpcEcashUnit::Bitcoin,
                 }))
             }
             LnV2OperationMeta::LnurlReceive(_) => Ok(None),
