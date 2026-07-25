@@ -1,4 +1,6 @@
+use fedimint_client::module::ClientModule;
 use fedimint_client::{Client, ClientModuleInstance};
+use fedimint_core::module::AmountUnit;
 use fedimint_ln_client::LightningClientModule;
 use fedimint_lnv2_client::LightningClientModule as LightningV2ClientModule;
 use fedimint_mint_client::MintClientModule;
@@ -33,8 +35,22 @@ pub trait ClientExt {
     /// Attempt to get the first mint (e-cash) client module instance.
     fn mint(&self) -> anyhow::Result<ClientModuleInstance<'_, MintClientModule>>;
 
-    /// Attempt to get the first mint v2 client module instance.
-    fn mintv2(&self) -> anyhow::Result<ClientModuleInstance<'_, MintV2ClientModule>>;
+    /// The mint v2 client module instance denominating e-cash in `unit`.
+    ///
+    /// A federation can carry more than one mintv2 instance (e.g. a
+    /// BITCOIN-unit mint for its Bitcoin balance plus the usdt module's
+    /// USDT-denominated mint), so instance selection is keyed on the amount
+    /// unit rather than "the sole instance".
+    #[allow(async_fn_in_trait)]
+    async fn mintv2_of_unit(
+        &self,
+        unit: AmountUnit,
+    ) -> anyhow::Result<ClientModuleInstance<'_, MintV2ClientModule>>;
+
+    /// All mint v2 client module instances of this federation, in ascending
+    /// instance-id order.
+    #[allow(async_fn_in_trait)]
+    async fn mintv2_instances(&self) -> Vec<ClientModuleInstance<'_, MintV2ClientModule>>;
 
     /// Attempt to get the first usdt client module instance.
     fn usdt(&self) -> anyhow::Result<ClientModuleInstance<'_, UsdtClientModule>>;
@@ -72,8 +88,40 @@ impl ClientExt for Client {
         self.get_first_module::<MintClientModule>()
     }
 
-    fn mintv2(&self) -> anyhow::Result<ClientModuleInstance<'_, MintV2ClientModule>> {
-        self.get_first_module::<MintV2ClientModule>()
+    async fn mintv2_of_unit(
+        &self,
+        unit: AmountUnit,
+    ) -> anyhow::Result<ClientModuleInstance<'_, MintV2ClientModule>> {
+        let instance_ids: Vec<_> = self
+            .config()
+            .await
+            .modules
+            .iter()
+            .filter(|(_, module)| module.is_kind(&MintV2ClientModule::kind()))
+            .map(|(id, _)| *id)
+            .collect();
+        for id in instance_ids {
+            let instance = self.get_module_by_instance::<MintV2ClientModule>(id)?;
+            if instance.amount_unit() == unit {
+                return Ok(instance);
+            }
+        }
+        anyhow::bail!("no mintv2 instance with unit {unit:?}")
+    }
+
+    async fn mintv2_instances(&self) -> Vec<ClientModuleInstance<'_, MintV2ClientModule>> {
+        let instance_ids: Vec<_> = self
+            .config()
+            .await
+            .modules
+            .iter()
+            .filter(|(_, module)| module.is_kind(&MintV2ClientModule::kind()))
+            .map(|(id, _)| *id)
+            .collect();
+        instance_ids
+            .into_iter()
+            .filter_map(|id| self.get_module_by_instance::<MintV2ClientModule>(id).ok())
+            .collect()
     }
 
     fn usdt(&self) -> anyhow::Result<ClientModuleInstance<'_, UsdtClientModule>> {

@@ -25,16 +25,17 @@ pub struct MintOpsV2;
 #[apply(async_trait_maybe_send!)]
 impl MintOps for MintOpsV2 {
     async fn get_raw_balance(&self, fed: &FederationV2) -> Amount {
-        let mintv2 = fed
+        // Only the BITCOIN-denominated mint contributes to the Bitcoin
+        // balance. A USDT-only federation has no such instance, so its
+        // Bitcoin balance is zero; USDT notes are surfaced through the
+        // dedicated account (usdtBalance) instead.
+        let Ok(mintv2) = fed
             .client
-            .mintv2()
-            .expect("mintv2 selected in FederationV2::new");
-        // A non-Bitcoin-denominated instance (e.g. the usdt module's USDT
-        // mint) is not part of the Bitcoin balance; its notes are surfaced
-        // through the dedicated account (usdtBalance) instead.
-        if mintv2.amount_unit() != fedimint_core::module::AmountUnit::BITCOIN {
+            .mintv2_of_unit(fedimint_core::module::AmountUnit::BITCOIN)
+            .await
+        else {
             return Amount::ZERO;
-        }
+        };
         mintv2
             .get_count_by_denomination()
             .await
@@ -49,9 +50,15 @@ impl MintOps for MintOpsV2 {
         ecash: String,
         frontend_meta: FrontendMetadata,
     ) -> Result<(Amount, OperationId)> {
-        let mintv2 = fed.client.mintv2()?;
         let ecash: MintV2ECash = decode_prefixed(FEDIMINT_PREFIX, &ecash)?;
         let amount = ecash.amount();
+        // Route by the note's own unit so a USDT note claimed through the
+        // generic path lands in the USDT-denominated mint; legacy unitless
+        // notes default to the Bitcoin mint.
+        let note_unit = ecash
+            .unit()
+            .unwrap_or(fedimint_core::module::AmountUnit::BITCOIN);
+        let mintv2 = fed.client.mintv2_of_unit(note_unit).await?;
         let fee_ppms = fed
             .get_fee_ppms_by_stream(fedimint_mint_client::KIND, RpcTransactionDirection::Receive)
             .await?;
@@ -85,7 +92,10 @@ impl MintOps for MintOpsV2 {
         frontend_meta: FrontendMetadata,
     ) -> Result<RpcGenerateEcashResponse> {
         let _guard = fed.generate_ecash_lock.lock().await;
-        let mintv2 = fed.client.mintv2()?;
+        let mintv2 = fed
+            .client
+            .mintv2_of_unit(fedimint_core::module::AmountUnit::BITCOIN)
+            .await?;
         let fees_by_stream = fed
             .get_fee_amounts_by_stream(
                 fedimint_mint_client::KIND,
@@ -110,13 +120,14 @@ impl MintOps for MintOpsV2 {
             frontend_metadata: Some(frontend_meta),
         })?;
         let (operation_id, mut ecash) = mintv2.send(amount, custom_meta).await?;
+        // Stamp the note with its unit so recipients (and validate_ecash) can
+        // classify it without a joined-federation instance lookup.
+        ecash = ecash.with_unit(fedimint_core::module::AmountUnit::BITCOIN);
         let sent_amount = ecash.amount();
         // Embed a federation invite so non-member recipients can
         // join-then-claim (skipped gracefully by older clients).
-        if include_invite {
-            if let Ok(invite) = fed.get_invite_code().await.parse() {
-                ecash = ecash.with_invite(invite);
-            }
+        if include_invite && let Ok(invite) = fed.get_invite_code().await.parse() {
+            ecash = ecash.with_invite(invite);
         }
         let ecash = encode_prefixed(FEDIMINT_PREFIX, &ecash);
         let settled_fees_by_stream = fed
@@ -142,9 +153,14 @@ impl MintOps for MintOpsV2 {
     }
 
     async fn cancel_ecash(&self, fed: &FederationV2, ecash: String) -> Result<()> {
-        let mintv2 = fed.client.mintv2()?;
         let decoded: MintV2ECash = decode_prefixed(FEDIMINT_PREFIX, &ecash)?;
         let amount = decoded.amount();
+        // Cancel reissues the notes back to their own mint, keyed on the
+        // note's unit (legacy unitless notes default to Bitcoin).
+        let note_unit = decoded
+            .unit()
+            .unwrap_or(fedimint_core::module::AmountUnit::BITCOIN);
+        let mintv2 = fed.client.mintv2_of_unit(note_unit).await?;
         let custom_meta = serde_json::to_value(EcashReceiveMetadata {
             internal: false,
             reason: EcashReceiveReason::Cancel,
@@ -205,6 +221,9 @@ impl MintOps for MintOpsV2 {
             } => {
                 if let Ok(decoded) = decode_prefixed::<MintV2ECash>(FEDIMINT_PREFIX, &ecash) {
                     let amount = decoded.amount();
+                    let note_unit = decoded
+                        .unit()
+                        .unwrap_or(fedimint_core::module::AmountUnit::BITCOIN);
                     let receive_meta = serde_json::from_value::<EcashReceiveMetadata>(custom_meta)
                         .unwrap_or(EcashReceiveMetadata {
                             internal: false,
@@ -214,10 +233,10 @@ impl MintOps for MintOpsV2 {
                     let is_fee_exempt =
                         receive_meta.internal || receive_meta.reason == EcashReceiveReason::Cancel;
                     fed.spawn_cancellable("subscribe mintv2 receive", move |fed| async move {
-                        let mintv2 = fed
-                            .client
-                            .mintv2()
-                            .expect("mintv2 selected in FederationV2::new");
+                        let Ok(mintv2) = fed.client.mintv2_of_unit(note_unit).await else {
+                            warn!("no mintv2 instance for unit {note_unit:?}");
+                            return;
+                        };
                         let final_state = mintv2
                             .await_final_receive_operation_state(operation_id)
                             .await;

@@ -274,14 +274,17 @@ impl Federations {
             if let Some(federation_id) = v2_ecash.mint() {
                 let federation_id = federation_id.to_string();
                 if self.get_federations_map().contains_key(&federation_id) {
-                    // mintv2 notes don't encode their unit; it is a property
-                    // of the joined federation's mint instance (e.g. USDT
-                    // for the usdt module's USDT-denominated mintv2).
-                    let unit = self
-                        .get_federation(&federation_id)
-                        .ok()
-                        .and_then(|fed| fed.ecash_unit())
-                        .unwrap_or_default();
+                    // Prefer the unit stamped on the note itself; this is
+                    // authoritative and works even while the federation is
+                    // still loading. Only legacy unitless notes fall back to
+                    // the joined federation's mint-instance lookup.
+                    let unit = match v2_ecash.unit() {
+                        Some(unit) => crate::federation_v2::usdt::rpc_ecash_unit(unit),
+                        None => match self.get_federation(&federation_id) {
+                            Ok(fed) => fed.ecash_unit().await.unwrap_or_default(),
+                            Err(_) => rpc_types::RpcEcashUnit::default(),
+                        },
+                    };
                     return Ok(RpcEcashInfo::Joined {
                         federation_id: RpcFederationId(federation_id),
                         amount,

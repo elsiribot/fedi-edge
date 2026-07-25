@@ -206,7 +206,7 @@ mod mint_ops;
 pub mod spv2_pay_address;
 mod spv2_sweeper_service;
 mod stability_pool_sweeper_service;
-mod usdt;
+pub(crate) mod usdt;
 mod wallet_ops;
 
 pub const GUARDIAN_STATUS_TIMEOUT: Duration = Duration::from_secs(10);

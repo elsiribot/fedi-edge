@@ -66,17 +66,31 @@ impl FederationV2 {
         self.client.usdt().is_ok()
     }
 
-    /// The unit this federation's mintv2 instance denominates e-cash in,
-    /// `None` if the federation has no mintv2 module.
-    pub fn ecash_unit(&self) -> Option<rpc_types::RpcEcashUnit> {
-        let unit = self.client.mintv2().ok()?.amount_unit();
-        Some(if unit == fedimint_core::module::AmountUnit::BITCOIN {
-            rpc_types::RpcEcashUnit::Bitcoin
-        } else if unit == USDT_UNIT {
-            rpc_types::RpcEcashUnit::Usdt
+    /// The unit a legacy (unitless) e-cash note from this federation is
+    /// denominated in, `None` if the federation has no mintv2 module.
+    ///
+    /// Consulted only as the fallback in `validate_ecash` for notes that
+    /// predate the on-note unit field. A federation may carry several mintv2
+    /// instances; we prefer the BITCOIN unit because legacy unitless notes
+    /// are always Bitcoin-denominated (the on-note unit field arrived
+    /// together with the USDT-denominated mint).
+    pub async fn ecash_unit(&self) -> Option<rpc_types::RpcEcashUnit> {
+        let units: Vec<_> = self
+            .client
+            .mintv2_instances()
+            .await
+            .iter()
+            .map(|instance| instance.amount_unit())
+            .collect();
+        if units.contains(&fedimint_core::module::AmountUnit::BITCOIN) {
+            Some(rpc_types::RpcEcashUnit::Bitcoin)
+        } else if units.contains(&USDT_UNIT) {
+            Some(rpc_types::RpcEcashUnit::Usdt)
+        } else if units.is_empty() {
+            None
         } else {
-            rpc_types::RpcEcashUnit::Other
-        })
+            Some(rpc_types::RpcEcashUnit::Other)
+        }
     }
 
     /// USDT e-cash balance in 10^-6 USDT units.
@@ -281,10 +295,7 @@ impl FederationV2 {
         frontend_meta: FrontendMetadata,
     ) -> Result<RpcUsdtGenerateEcashResponse> {
         let _guard = self.generate_ecash_lock.lock().await;
-        let mintv2 = self.client.mintv2()?;
-        if mintv2.amount_unit() != USDT_UNIT {
-            bail!("this federation's mint is not USDT-denominated");
-        }
+        let mintv2 = self.client.mintv2_of_unit(USDT_UNIT).await?;
         if amount.0 == 0 {
             bail!("amount must be positive");
         }
@@ -300,6 +311,9 @@ impl FederationV2 {
         let (operation_id, mut ecash) = mintv2
             .send(fedimint_core::Amount::from_msats(amount.0), custom_meta)
             .await?;
+        // Stamp the note with its unit so recipients (and validate_ecash) can
+        // classify it as USDT without a joined-federation instance lookup.
+        ecash = ecash.with_unit(USDT_UNIT);
         drop(spend_guard);
         // Embed a federation invite so non-member recipients can
         // join-then-claim (skipped gracefully by older clients).
@@ -316,10 +330,7 @@ impl FederationV2 {
     /// Redeems USDT-denominated e-cash notes into our balance (fee-free),
     /// returning the received amount in 10^-6 USDT units.
     pub async fn usdt_receive_ecash(&self, ecash: String) -> Result<RpcUsdtAmount> {
-        let mintv2 = self.client.mintv2()?;
-        if mintv2.amount_unit() != USDT_UNIT {
-            bail!("this federation's mint is not USDT-denominated");
-        }
+        let mintv2 = self.client.mintv2_of_unit(USDT_UNIT).await?;
         let decoded: MintV2ECash = decode_prefixed(FEDIMINT_PREFIX, &ecash)?;
         let amount = decoded.amount();
         let custom_meta = serde_json::to_value(EcashReceiveMetadata {
@@ -344,11 +355,7 @@ impl FederationV2 {
     /// (usdt module claims) and withdrawals, plus USDT e-cash sends/receives
     /// (USDT-denominated mintv2 operations). Newest first.
     pub async fn usdt_list_transactions(&self, limit: usize) -> Result<Vec<RpcUsdtTransaction>> {
-        let include_mintv2 = self
-            .client
-            .mintv2()
-            .map(|m| m.amount_unit() == USDT_UNIT)
-            .unwrap_or(false);
+        let include_mintv2 = self.client.mintv2_of_unit(USDT_UNIT).await.is_ok();
 
         let entries = self
             .client
@@ -632,6 +639,17 @@ fn convert_withdrawal_status(status: WithdrawalStatus) -> RpcUsdtWithdrawalStatu
 
 fn variant_eq(a: &RpcUsdtWithdrawalStatus, b: &RpcUsdtWithdrawalStatus) -> bool {
     std::mem::discriminant(a) == std::mem::discriminant(b)
+}
+
+/// Map a mintv2 [`AmountUnit`] to the RPC-facing e-cash unit tag.
+pub(crate) fn rpc_ecash_unit(unit: fedimint_core::module::AmountUnit) -> rpc_types::RpcEcashUnit {
+    if unit == fedimint_core::module::AmountUnit::BITCOIN {
+        rpc_types::RpcEcashUnit::Bitcoin
+    } else if unit == USDT_UNIT {
+        rpc_types::RpcEcashUnit::Usdt
+    } else {
+        rpc_types::RpcEcashUnit::Other
+    }
 }
 
 /// Decode the raw USDT amount carried inside a mintv2 e-cash string.
