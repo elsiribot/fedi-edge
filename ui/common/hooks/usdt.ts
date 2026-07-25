@@ -1,7 +1,12 @@
 import { useCallback, useEffect } from 'react'
 
-import { refreshUsdtBalance, selectUsdtBalanceMicros } from '../redux'
+import {
+    refreshUsdtBalance,
+    selectCurrencyLocale,
+    selectUsdtBalanceMicros,
+} from '../redux'
 import { Federation } from '../types'
+import amountUtils from '../utils/AmountUtils'
 import { makeLog } from '../utils/log'
 import { formatUsdtMicros } from '../utils/usdt'
 import { useIsUsdtSupported } from './federation'
@@ -9,6 +14,18 @@ import { useFedimint } from './fedimint'
 import { useCommonDispatch, useCommonSelector } from './redux'
 
 const log = makeLog('common/hooks/usdt')
+
+/**
+ * Returns the decimal separator (e.g. `.` for en-US, `,` for de-DE) that a
+ * USDT amount-entry field's numpad should insert for the user's currency
+ * locale, and that callers should pass to `parseUsdtInput` when parsing
+ * that field's raw text. Mirrors the locale handling `useAmountInput` does
+ * for BTC/fiat amount entry so USDT input follows the same conventions.
+ */
+export const useUsdtDecimalSeparator = (): string => {
+    const currencyLocale = useCommonSelector(selectCurrencyLocale)
+    return amountUtils.getDecimalSeparator({ locale: currencyLocale })
+}
 
 export const useUsdtBalance = (federationId: Federation['id']) => {
     const dispatch = useCommonDispatch()

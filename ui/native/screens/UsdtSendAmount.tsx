@@ -7,6 +7,7 @@ import { StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
+import { useUsdtDecimalSeparator } from '@fedi/common/hooks/usdt'
 import {
     selectPaymentFederation,
     selectUsdtBalanceMicros,
@@ -16,6 +17,7 @@ import { makeLog } from '@fedi/common/utils/log'
 import {
     formatUsdtMicros,
     isValidEvmAddress,
+    microsToDecimalString,
     parseUsdtInput,
 } from '@fedi/common/utils/usdt'
 
@@ -30,10 +32,6 @@ const log = makeLog('UsdtSendAmount')
 
 export type Props = NativeStackScreenProps<RootStackParamList, 'UsdtSendAmount'>
 
-/** Converts micros to a plain decimal input string, e.g. 1500000 -> "1.50" */
-const microsToAmountInput = (micros: number): string =>
-    formatUsdtMicros(micros, { symbol: false }).replace(/,/g, '')
-
 /**
  * Amount entry + network fee quote step of the USDT send flow. The
  * recipient address arrives from the UsdtSend scanner, but stays editable.
@@ -44,6 +42,7 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
     const { theme } = useTheme()
     const toast = useToast()
     const fedimint = useFedimint()
+    const decimalSeparator = useUsdtDecimalSeparator()
 
     const federation = useAppSelector(selectPaymentFederation)
     const federationId = federation?.id ?? ''
@@ -54,7 +53,10 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
     const [recipient, setRecipient] = useState(route.params.recipient)
     const [amountInput, setAmountInput] = useState(() =>
         route.params.amountMicros
-            ? microsToAmountInput(route.params.amountMicros)
+            ? microsToDecimalString(route.params.amountMicros).replace(
+                  '.',
+                  decimalSeparator,
+              )
             : '',
     )
     const [feeMicros, setFeeMicros] = useState<number | null>(null)
@@ -62,8 +64,9 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
 
     const trimmedRecipient = recipient.trim()
     const isRecipientValid = isValidEvmAddress(trimmedRecipient)
-    // Ignore a transient trailing decimal point mid-entry, e.g. "5."
-    const amountMicros = parseUsdtInput(amountInput.replace(/\.$/, ''))
+    // `parseUsdtInput` itself tolerates a transient trailing decimal
+    // separator mid-entry, e.g. "5."
+    const amountMicros = parseUsdtInput(amountInput, { decimalSeparator })
     const hasInsufficientBalance =
         amountMicros !== null && amountMicros > balanceMicros
     const isAmountValid =

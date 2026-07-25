@@ -6,6 +6,7 @@ import { StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
+import { useUsdtDecimalSeparator } from '@fedi/common/hooks/usdt'
 import {
     refreshUsdtBalance,
     selectPaymentFederation,
@@ -36,6 +37,7 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
     const toast = useToast()
     const fedimint = useFedimint()
     const dispatch = useAppDispatch()
+    const decimalSeparator = useUsdtDecimalSeparator()
 
     const federation = useAppSelector(selectPaymentFederation)
     const federationId = federation?.id ?? ''
@@ -46,8 +48,9 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
     const [amountInput, setAmountInput] = useState('')
     const [isGenerating, setIsGenerating] = useState(false)
 
-    // Ignore a transient trailing decimal point mid-entry, e.g. "5."
-    const amountMicros = parseUsdtInput(amountInput.replace(/\.$/, ''))
+    // `parseUsdtInput` tolerates a transient trailing decimal separator
+    // mid-entry, e.g. "5."
+    const amountMicros = parseUsdtInput(amountInput, { decimalSeparator })
     const hasInsufficientBalance =
         amountMicros !== null && amountMicros > balanceMicros
     const isAmountValid =

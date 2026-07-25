@@ -14,6 +14,7 @@ import Animated, {
     withTiming,
 } from 'react-native-reanimated'
 
+import { useUsdtDecimalSeparator } from '@fedi/common/hooks/usdt'
 import { NumpadButtonValue, numpadButtons } from '@fedi/common/types/amount'
 import { makeLog } from '@fedi/common/utils/log'
 import { USDT_DECIMALS } from '@fedi/common/utils/usdt'
@@ -67,24 +68,35 @@ const UsdtAmountInput: React.FC<Props> = ({
 
     const style = styles(theme, width)
 
+    // Locale-aware decimal separator ('.' for en-US, ',' for de-DE, …).
+    // `amountInput` is always kept in this separator - callers must pass
+    // the same separator to `parseUsdtInput` when parsing it.
+    const decimalSeparator = useUsdtDecimalSeparator()
+
     // Fallback for small screens where the numpad is hidden and the OS
-    // keyboard is used instead: keep only digits and one decimal point,
-    // clamped to the supported precision
+    // keyboard is used instead: keep only digits and one decimal
+    // separator, clamped to the supported precision. Hardware/soft
+    // keyboards may emit either '.' or ',' regardless of locale, so both
+    // are normalized to the active locale separator (mirrors
+    // useAmountInput's numpad handling).
     const handleChangeText = (value: string) => {
-        const cleaned = value.replace(/,/g, '.').replace(/[^0-9.]/g, '')
-        const firstDot = cleaned.indexOf('.')
+        const cleaned = value
+            .replace(/[.,]/g, decimalSeparator)
+            .replace(new RegExp(`[^0-9${decimalSeparator}]`, 'g'), '')
+        const firstSep = cleaned.indexOf(decimalSeparator)
         const whole = (
-            firstDot === -1 ? cleaned : cleaned.slice(0, firstDot)
+            firstSep === -1 ? cleaned : cleaned.slice(0, firstSep)
         ).slice(0, MAX_WHOLE_DIGITS)
-        if (firstDot === -1) {
+        if (firstSep === -1) {
             onChangeAmountInput(whole)
             return
         }
         const fraction = cleaned
-            .slice(firstDot + 1)
-            .replace(/\./g, '')
+            .slice(firstSep + 1)
+            .split(decimalSeparator)
+            .join('')
             .slice(0, USDT_DECIMALS)
-        onChangeAmountInput(`${whole}.${fraction}`)
+        onChangeAmountInput(`${whole}${decimalSeparator}${fraction}`)
     }
 
     /** Returns true if the press was rejected (triggers the shake) */
@@ -93,14 +105,20 @@ const UsdtAmountInput: React.FC<Props> = ({
             onChangeAmountInput(amountInput.slice(0, -1))
             return false
         }
+        // The numpad's decimal key always raises the raw '.' button value
+        // regardless of locale - translate it to the locale separator
         if (btn === '.') {
-            if (amountInput.includes('.')) return true
-            onChangeAmountInput(amountInput ? `${amountInput}.` : '0.')
+            if (amountInput.includes(decimalSeparator)) return true
+            onChangeAmountInput(
+                amountInput
+                    ? `${amountInput}${decimalSeparator}`
+                    : `0${decimalSeparator}`,
+            )
             return false
         }
         const next =
             amountInput === '0' ? String(btn) : amountInput + String(btn)
-        const [whole = '', fraction = ''] = next.split('.')
+        const [whole = '', fraction = ''] = next.split(decimalSeparator)
         if (fraction.length > USDT_DECIMALS) return true
         if (whole.length > MAX_WHOLE_DIGITS) return true
         onChangeAmountInput(next)

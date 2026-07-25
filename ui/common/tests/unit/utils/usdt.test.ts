@@ -1,6 +1,7 @@
 import {
     formatUsdtMicros,
     isValidEvmAddress,
+    microsToDecimalString,
     parseUsdtInput,
     parseUsdtRecipientInput,
     USDT_MICROS_PER_USDT,
@@ -39,6 +40,27 @@ describe('usdt utils', () => {
         it('omits the symbol when requested', () => {
             expect(formatUsdtMicros(1_500_000, { symbol: false })).toBe('1.50')
         })
+
+        it('formats using locale-specific grouping/decimal separators', () => {
+            expect(
+                formatUsdtMicros(1_234_560_000, { locale: 'de-DE' }),
+            ).toBe('1.234,56 USDT')
+            expect(
+                formatUsdtMicros(1_234_560_000, { locale: 'en-US' }),
+            ).toBe('1,234.56 USDT')
+        })
+    })
+
+    describe('microsToDecimalString', () => {
+        it('formats as a plain, non-localized decimal string', () => {
+            expect(microsToDecimalString(0)).toBe('0.00')
+            expect(microsToDecimalString(1_500_000)).toBe('1.50')
+            expect(microsToDecimalString(1_234_567)).toBe('1.234567')
+            expect(microsToDecimalString(1_234_567_000_000)).toBe(
+                '1234567.00',
+            )
+            expect(microsToDecimalString(-1_500_000)).toBe('-1.50')
+        })
     })
 
     describe('parseUsdtInput', () => {
@@ -67,6 +89,34 @@ describe('usdt utils', () => {
             expect(parseUsdtInput('-1')).toBeNull()
             expect(parseUsdtInput('1.2345678')).toBeNull()
             expect(parseUsdtInput('1,000.5')).toBeNull()
+        })
+    })
+
+    describe('parseUsdtInput with a locale decimal separator', () => {
+        it('treats the other separator as a grouping separator', () => {
+            expect(
+                parseUsdtInput('1,000', { decimalSeparator: '.' }),
+            ).toBe(1_000_000_000) // 1000 USDT in micros
+            expect(
+                parseUsdtInput('1,5', { decimalSeparator: ',' }),
+            ).toBe(1_500_000)
+        })
+
+        it('tolerates a trailing decimal separator', () => {
+            expect(parseUsdtInput('1.', { decimalSeparator: '.' })).toBe(
+                1_000_000,
+            )
+        })
+
+        it('rejects ambiguous forms', () => {
+            // comma isn't valid grouping (not a group of 3) and isn't the
+            // decimal separator either
+            expect(
+                parseUsdtInput('1,5', { decimalSeparator: '.' }),
+            ).toBeNull()
+            expect(
+                parseUsdtInput('1.5.5', { decimalSeparator: '.' }),
+            ).toBeNull()
         })
     })
 

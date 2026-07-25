@@ -6,9 +6,14 @@ import { ActivityIndicator, Pressable, StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
+import { useUsdtDecimalSeparator } from '@fedi/common/hooks/usdt'
 import { refreshUsdtBalance, selectPaymentFederation } from '@fedi/common/redux'
 import { makeLog } from '@fedi/common/utils/log'
-import { formatUsdtMicros, parseUsdtInput } from '@fedi/common/utils/usdt'
+import {
+    formatUsdtMicros,
+    microsToDecimalString,
+    parseUsdtInput,
+} from '@fedi/common/utils/usdt'
 
 import ReceiveQr from '../components/feature/receive/ReceiveQr'
 import { Column, Row } from '../components/ui/Flex'
@@ -22,16 +27,13 @@ const log = makeLog('UsdtReceive')
 
 export type Props = NativeStackScreenProps<RootStackParamList, 'UsdtReceive'>
 
-/** Converts micros to a plain decimal string, e.g. 1500000 -> "1.50" */
-const microsToDecimalString = (micros: number): string =>
-    formatUsdtMicros(micros, { symbol: false }).replace(/,/g, '')
-
 const UsdtReceive: React.FC<Props> = () => {
     const { t } = useTranslation()
     const { theme } = useTheme()
     const toast = useToast()
     const fedimint = useFedimint()
     const dispatch = useAppDispatch()
+    const decimalSeparator = useUsdtDecimalSeparator()
 
     const federation = useAppSelector(selectPaymentFederation)
     const federationId = federation?.id ?? ''
@@ -100,20 +102,25 @@ const UsdtReceive: React.FC<Props> = () => {
 
     const handleEditRequestAmount = () => {
         setAmountInput(
-            requestedMicros ? microsToDecimalString(requestedMicros) : '',
+            requestedMicros
+                ? microsToDecimalString(requestedMicros).replace(
+                      '.',
+                      decimalSeparator,
+                  )
+                : '',
         )
         setIsEnteringAmount(true)
     }
 
     const handleConfirmRequestAmount = () => {
-        // Ignore a transient trailing decimal point, e.g. "5."
-        const amountMicros = parseUsdtInput(amountInput.replace(/\.$/, ''))
+        const amountMicros = parseUsdtInput(amountInput, { decimalSeparator })
         setRequestedMicros(
             amountMicros !== null && amountMicros > 0 ? amountMicros : null,
         )
         setIsEnteringAmount(false)
     }
 
+    // Machine format only - URIs never carry locale-formatted amounts
     const requestUri =
         address && requestedMicros
             ? `ethereum:${address}?amount=${microsToDecimalString(requestedMicros)}`
