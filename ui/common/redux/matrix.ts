@@ -94,6 +94,7 @@ import {
     doesEventContentMatchPreviewMedia,
     getMultispendInvite,
     getMultispendRole,
+    getPaymentUnit,
     getReceivablePaymentEvents,
     getRoomEventPowerLevel,
     getUserSuffix,
@@ -1811,13 +1812,25 @@ export const claimMatrixPayment = createAsyncThunk<
         if (!federationId)
             throw new Error('Payment message is missing federationId')
 
+        const paymentUnit = getPaymentUnit(event.content)
+        // `getReceivablePaymentEvents` already filters these out before
+        // dispatching this thunk from the auto-claim loop, but guard here
+        // too since this is the one place that actually redeems ecash —
+        // we must never call receiveEcash/usdtReceiveEcash for a unit we
+        // don't understand how to redeem.
+        if (paymentUnit === 'unsupported') {
+            throw new Error(
+                'Cannot claim a payment with an unsupported ecash unit',
+            )
+        }
+
         let receiverOperationId: string | undefined
         // the amount actually redeemed from the ecash, when it differs from
         // (or simply confirms) the sender-declared `event.content.amount` —
         // used to correct the post-claim status update below so the bubble
         // never displays an unverified, sender-controlled amount
         let redeemedAmountMicros: number | undefined
-        if (event.content.unit === 'usdt') {
+        if (paymentUnit === 'usdt') {
             // USDT-denominated ecash is redeemed via the USDT module and
             // has no receiver operation ID. Capture what was actually
             // redeemed rather than trusting the sender-declared `amount` —
@@ -1879,7 +1892,23 @@ export const tryReclaimMatrixPayment = createAsyncThunk<
         )
             return
 
-        if (event.content.unit === 'usdt') {
+        const paymentUnit = getPaymentUnit(event.content)
+
+        // never auto-reclaim ecash denominated in a unit this app version
+        // doesn't understand — we don't know how to redeem it back.
+        // `getReclaimablePaymentEvents` already filters these out before
+        // dispatch, but guard here too since this thunk is what actually
+        // touches the ecash.
+        if (paymentUnit === 'unsupported') {
+            log.info(
+                'Skip reclaiming rejected matrix payment with operation ID',
+                event.content.senderOperationId,
+                ': unsupported ecash unit',
+            )
+            return
+        }
+
+        if (paymentUnit === 'usdt') {
             log.info(
                 'Reclaiming rejected USDT payment with operation ID:',
                 event.content.senderOperationId,
@@ -2074,7 +2103,8 @@ export const cancelMatrixPayment = createAsyncThunk<
     const client = fedimint.getMatrixClient()
 
     if (event.content.ecash && event.content.federationId) {
-        if (event.content.unit === 'usdt') {
+        const paymentUnit = getPaymentUnit(event.content)
+        if (paymentUnit === 'usdt') {
             // USDT notes are reclaimed by redeeming them back ourselves
             await fedimint.usdtReceiveEcash(
                 event.content.ecash,
@@ -2086,12 +2116,15 @@ export const cancelMatrixPayment = createAsyncThunk<
                     federationId: event.content.federationId,
                 }),
             )
-        } else {
+        } else if (paymentUnit === 'bitcoin') {
             await fedimint.cancelEcash(
                 event.content.ecash,
                 event.content.federationId,
             )
         }
+        // unsupported: we don't know how to redeem/cancel this ecash via
+        // the bridge, so don't attempt it — still fall through below to
+        // mark the message canceled so the UI reflects the cancellation
     }
 
     await client.sendMessage(event.roomId, {
@@ -2119,6 +2152,17 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
         if (!federationId) throw new Error('Payment missing federationId')
         if (!amount) throw new Error('Payment request missing amount')
 
+        const paymentUnit = getPaymentUnit(event.content)
+        // The UI never renders an accept/pay button for a request
+        // denominated in an unsupported ecash unit, but guard here too —
+        // we don't know how to generate ecash for a unit we don't
+        // understand.
+        if (paymentUnit === 'unsupported') {
+            throw new Error(
+                'Cannot accept a payment request with an unsupported ecash unit',
+            )
+        }
+
         const federation = selectLoadedFederation(getState(), federationId)
         const client = fedimint.getMatrixClient()
 
@@ -2132,7 +2176,7 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
         // paid with USDT ecash (no Fedi fees). The requester is a room
         // member but possibly not a federation member yet, so embed an
         // invite unless the federation opted out.
-        if (event.content.unit === 'usdt') {
+        if (paymentUnit === 'usdt') {
             const { ecash, operationId: senderOperationId } =
                 await fedimint.usdtGenerateEcash(
                     amount,
@@ -3331,9 +3375,12 @@ export const selectCanPayFromOtherFeds = createSelector(
     (s: CommonState) => selectLoadedFederations(s),
     (s: CommonState, chatPayment: MatrixPaymentEvent) => chatPayment,
     (federations, chatPayment): boolean => {
-        // USDT-denominated payments can only be paid from the federation
-        // whose mint issued the USDT ecash
-        if (chatPayment.content.unit === 'usdt') return false
+        // Only plain bitcoin (sats) requests can be paid from an arbitrary
+        // joined federation's balance. USDT-denominated payments can only
+        // be paid from the federation whose mint issued the USDT ecash, and
+        // an unsupported unit can't be paid from anywhere — we don't know
+        // how to generate ecash for it.
+        if (getPaymentUnit(chatPayment.content) !== 'bitcoin') return false
         return !!federations.find(
             f => f.balance && f.balance > chatPayment.content.amount,
         )
@@ -3348,9 +3395,14 @@ export const selectCanSendPayment = createSelector(
             ? selectUsdtBalanceMicros(s, chatPayment.content.federationId)
             : 0,
     (federations, chatPayment, usdtBalanceMicros): boolean => {
+        const paymentUnit = getPaymentUnit(chatPayment.content)
+        // A request denominated in a unit this app version doesn't
+        // understand can never be paid — we don't know how to generate
+        // matching ecash for it.
+        if (paymentUnit === 'unsupported') return false
         // USDT payments are denominated in micros and checked against the
         // federation's USDT balance (no Fedi fees for USDT)
-        if (chatPayment.content.unit === 'usdt') {
+        if (paymentUnit === 'usdt') {
             return (
                 !!federations.find(
                     f => f.id === chatPayment.content.federationId,

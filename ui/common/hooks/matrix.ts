@@ -94,6 +94,7 @@ import { makeLog } from '../utils/log'
 import {
     decodeFediMatrixUserUri,
     getEventBodyPreview,
+    getPaymentUnit,
     getReplyData,
     isBannedFromRoomError,
     isValidMatrixUserId,
@@ -732,6 +733,7 @@ export function useMatrixPaymentEvent({
 
     const paymentStatus = event.content.status
     const isBolt11 = !!event.content.bolt11
+    const paymentUnit = getPaymentUnit(event.content)
 
     let statusIcon: 'x' | 'reject' | 'check' | 'error' | 'loading' | undefined
     let statusText: string | undefined
@@ -766,7 +768,12 @@ export function useMatrixPaymentEvent({
         statusIcon = 'x'
         statusText = t('words.canceled')
     } else if (paymentStatus === 'pushed' || paymentStatus === 'accepted') {
-        if (!canClaimPayment) {
+        if (paymentUnit === 'unsupported') {
+            // No claim path exists for an ecash unit this app version
+            // doesn't understand: no auto-claim, no accept/reject buttons,
+            // no "receiving..." spinner implying a claim is in progress.
+            // `messageText` above already conveys the unsupported state.
+        } else if (!canClaimPayment) {
             buttons = [
                 {
                     label: t('words.reject'),
@@ -835,12 +842,17 @@ export function useMatrixPaymentEvent({
                         disabled: isAccepting,
                     })
                 }
-                buttons.push({
-                    label: t('words.pay'),
-                    handler: handleAcceptRequest,
-                    loading: isAccepting,
-                    disabled: isRejecting,
-                })
+                // No accept/pay button for a request denominated in an
+                // ecash unit this app version doesn't understand — we
+                // don't know how to generate matching ecash for it.
+                if (paymentUnit !== 'unsupported') {
+                    buttons.push({
+                        label: t('words.pay'),
+                        handler: handleAcceptRequest,
+                        loading: isAccepting,
+                        disabled: isRejecting,
+                    })
+                }
             }
         }
     }
@@ -1484,12 +1496,25 @@ export function useMatrixPaymentTransaction({
 
         const isSentByMe = event.content.senderId === currentUserId
 
+        const paymentUnit = getPaymentUnit(event.content)
+
+        // Nothing to verify for a unit this app version doesn't
+        // understand — the bubble always shows the unsupported string
+        // regardless of amount, so skip the parseEcash round-trip entirely.
+        if (paymentUnit === 'unsupported') {
+            setHasTriedFetch(true)
+            setTransaction(null)
+            setVerifiedAmountMicros(null)
+            setIsLoading(false)
+            return
+        }
+
         // USDT payment operations don't appear in the bitcoin transaction
         // history, so don't attempt to fetch a transaction for them. Instead,
         // when ecash is attached (pushed payments), verify the amount it's
         // actually redeemable for via the bridge — the `amount` in the event
         // body is sender-declared and must not be trusted for display.
-        if (event.content.unit === 'usdt') {
+        if (paymentUnit === 'usdt') {
             const { ecash } = event.content
 
             // requests have no ecash attached yet, so there's nothing to
@@ -2093,8 +2118,11 @@ export function useMatrixRoomPreview({
         if (
             preferredPreviewRoom.preview.content.msgtype === 'xyz.fedi.payment'
         ) {
-            const { amount, senderId, recipientId, unit } =
+            const { amount, senderId, recipientId } =
                 preferredPreviewRoom.preview.content
+            const paymentUnit = getPaymentUnit(
+                preferredPreviewRoom.preview.content,
+            )
 
             let messageKey = 'feature.receive.they-requested-amount-unit'
 
@@ -2105,8 +2133,14 @@ export function useMatrixRoomPreview({
             else if (recipientId === myId)
                 messageKey = 'feature.receive.you-requested-amount-unit'
 
+            // Unknown ecash units can't be formatted as sats or USDT
+            // without misrepresenting the amount
+            if (paymentUnit === 'unsupported') {
+                return t('feature.chat.unsupported-payment-unit')
+            }
+
             // USDT payments carry the amount in USDT micros
-            if (unit === 'usdt') {
+            if (paymentUnit === 'usdt') {
                 return t(messageKey as ResourceKey, {
                     amount: formatUsdtMicros(amount, { symbol: false }),
                     unit: 'USDT',

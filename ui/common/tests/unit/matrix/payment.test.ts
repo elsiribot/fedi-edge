@@ -13,6 +13,7 @@ import { RpcTimelineEventItemId } from '../../../types/bindings'
 import { BridgeError } from '../../../utils/errors'
 import {
     consolidatePaymentEvents,
+    getReceivablePaymentEvents,
     makeMatrixPaymentText,
 } from '../../../utils/matrix'
 import { formatUsdtMicros } from '../../../utils/usdt'
@@ -691,5 +692,207 @@ describe('tryReclaimMatrixPayment BTC reclaim path (untouched by this change)', 
         ).resolves.toBeUndefined()
 
         expect(getTransaction).toHaveBeenCalledWith('fed123', 'sender-op-123')
+    })
+})
+
+/*
+// Unsupported Ecash Unit Tests
+// Business Context: `RpcEcashUnit` already includes 'other', and future app
+// versions may add units this build doesn't know about. Every chat-payment
+// code path branched on `unit === 'usdt'`, so an unrecognized unit silently
+// fell through to the bitcoin branch: micros formatted and displayed as
+// sats, and auto-claim attempted via the BTC `receiveEcash` RPC on a token
+// it can't actually parse. `getPaymentUnit` normalizes `unit` so every
+// branch treats anything besides 'bitcoin'/'usdt' as 'unsupported': no
+// auto-claim, no accept button, and the bubble shows a dedicated string
+// instead of a misleading sats amount.
+*/
+
+// BUSINESS: a payment denominated in a unit this app version doesn't
+// understand must never be rendered as a sats amount
+describe('makeMatrixPaymentText unsupported ecash unit', () => {
+    it('renders the unsupported-unit string instead of formatting the amount as sats', () => {
+        const t = jest.fn((key: string) => key) as unknown as TFunction
+        const event = createMockPaymentEvent({
+            content: {
+                unit: 'other',
+                status: 'pushed',
+                amount: 1000,
+                ecash: 'mock-ecash-token',
+                senderId: 'npub1sender',
+                recipientId: 'npub1recipient',
+            },
+        })
+
+        const result = makeMatrixPaymentText({
+            t,
+            event,
+            myId: 'npub1recipient',
+            eventSender: null,
+            paymentSender: null,
+            paymentRecipient: null,
+            transaction: null,
+            ...noopAmountFormatters,
+            verifiedAmountMicros: undefined,
+        })
+
+        expect(result).toBe('feature.chat.unsupported-payment-unit')
+        // exactly one `t` call, with no second (interpolation) argument —
+        // in particular, never a sats-formatted amount
+        expect(t).toHaveBeenCalledTimes(1)
+        expect(t).toHaveBeenCalledWith('feature.chat.unsupported-payment-unit')
+    })
+})
+
+// BUSINESS: the auto-claim loop must never attempt to redeem ecash in a
+// unit it doesn't understand
+describe('unsupported ecash unit auto-claim eligibility', () => {
+    it('excludes an unsupported-unit payment from getReceivablePaymentEvents, even when otherwise eligible', () => {
+        const event = createMockPaymentEvent({
+            content: {
+                unit: 'other',
+                status: 'pushed',
+                amount: 1000,
+                ecash: 'mock-ecash-token',
+                senderId: 'npub1sender',
+                recipientId: 'npub1recipient',
+                federationId: 'fed123',
+            },
+        })
+
+        const receivable = getReceivablePaymentEvents(
+            [event],
+            'npub1recipient',
+            [{ id: 'fed123', recovering: false } as any],
+        )
+
+        expect(receivable).toHaveLength(0)
+    })
+
+    it('claimMatrixPayment (the auto-claim dispatch) makes zero receiveEcash/usdtReceiveEcash calls for an unsupported unit', async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+        )
+
+        const roomId = 'room-a' as MatrixRoom['id']
+        const event = createMockPaymentEvent({
+            roomId,
+            content: {
+                unit: 'other',
+                status: 'pushed',
+                amount: 1000,
+                ecash: 'mock-ecash-token',
+                federationId: 'fed123',
+                senderId: 'npub1sender',
+                recipientId: 'npub1recipient',
+            },
+        })
+
+        const sendMessage = jest.fn().mockResolvedValue(undefined)
+        const markRoomAsUnread = jest.fn().mockResolvedValue(undefined)
+        const receiveEcash = jest.fn().mockResolvedValue(['note', 'op-123'])
+        const usdtReceiveEcash = jest.fn().mockResolvedValue(1)
+        const fedimint = {
+            getMatrixClient: () => ({ sendMessage, markRoomAsUnread }),
+            receiveEcash,
+            usdtReceiveEcash,
+            usdtBalance: jest.fn().mockResolvedValue(0),
+        } as any
+
+        await expect(
+            store.dispatch(claimMatrixPayment({ fedimint, event })).unwrap(),
+        ).rejects.toBeDefined()
+
+        expect(receiveEcash).not.toHaveBeenCalled()
+        expect(usdtReceiveEcash).not.toHaveBeenCalled()
+        expect(sendMessage).not.toHaveBeenCalled()
+    })
+})
+
+// BUSINESS: regression guard — payments with no `unit` field (old-sender
+// compatibility) or `unit: 'bitcoin'` must keep behaving exactly as before
+// this change, both for display and for claiming
+describe('undefined/bitcoin unit regression (unaffected by this change)', () => {
+    it('makeMatrixPaymentText renders the normal sats payment text, not the unsupported string', () => {
+        const t = jest.fn((key: string) => key) as unknown as TFunction
+        const event = createMockPaymentEvent({
+            content: {
+                unit: undefined,
+                status: 'pushed',
+                amount: 1000,
+                ecash: 'mock-ecash-token',
+                senderId: 'npub1sender',
+                recipientId: 'npub1recipient',
+            },
+        })
+
+        const result = makeMatrixPaymentText({
+            t,
+            event,
+            myId: 'npub1recipient',
+            eventSender: null,
+            paymentSender: null,
+            paymentRecipient: null,
+            transaction: null,
+            makeFormattedAmountsFromMSats: jest.fn().mockReturnValue({
+                formattedFiat: '$0.50',
+                formattedSats: '1,000',
+                formattedUsd: '$0.50',
+                formattedPrimaryAmount: '$0.50',
+                formattedSecondaryAmount: '1,000 SATS',
+            }),
+            makeFormattedAmountsFromTxn: jest.fn(),
+            verifiedAmountMicros: undefined,
+        })
+
+        expect(result).toBe('feature.chat.they-sent-payment')
+        expect(t).not.toHaveBeenCalledWith(
+            'feature.chat.unsupported-payment-unit',
+        )
+    })
+
+    it('claimMatrixPayment still redeems via the BTC receiveEcash RPC for an undefined unit', async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+        )
+
+        const roomId = 'room-a' as MatrixRoom['id']
+        const event = createMockPaymentEvent({
+            roomId,
+            content: {
+                unit: undefined,
+                status: 'pushed',
+                amount: 1000,
+                ecash: 'mock-ecash-token',
+                federationId: 'fed123',
+                senderId: 'npub1sender',
+                recipientId: 'npub1recipient',
+            },
+        })
+
+        const sendMessage = jest.fn().mockResolvedValue(undefined)
+        const markRoomAsUnread = jest.fn().mockResolvedValue(undefined)
+        const receiveEcash = jest.fn().mockResolvedValue(['note', 'op-123'])
+        const usdtReceiveEcash = jest.fn()
+        const fedimint = {
+            getMatrixClient: () => ({ sendMessage, markRoomAsUnread }),
+            receiveEcash,
+            usdtReceiveEcash,
+        } as any
+
+        await store.dispatch(claimMatrixPayment({ fedimint, event })).unwrap()
+
+        expect(receiveEcash).toHaveBeenCalledWith(
+            'mock-ecash-token',
+            'fed123',
+            expect.anything(),
+        )
+        expect(usdtReceiveEcash).not.toHaveBeenCalled()
+        expect(sendMessage).toHaveBeenCalledWith(
+            roomId,
+            expect.objectContaining({ status: 'received' }),
+        )
     })
 })

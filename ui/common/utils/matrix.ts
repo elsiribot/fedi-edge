@@ -52,6 +52,7 @@ import {
     SendMessageData,
     RpcMentions,
     JSONObject,
+    RpcEcashUnit,
     RpcTimelineItemEvent,
     RpcTimelineReaction,
     RpcUserPowerLevel,
@@ -460,6 +461,29 @@ export function getRoomEventPowerLevel(
     return powerLevels.events_default || 0
 }
 
+/**
+ * Normalizes a payment event's `unit` field into the three ecash "kinds"
+ * chat payments know how to reason about. Every unit-dependent chat payment
+ * branch (claim, reclaim, cancel, accept, auto-claim eligibility, display)
+ * MUST route through this helper rather than comparing `unit` directly, so
+ * that any unit besides `'bitcoin'` / `'usdt'` — including `'other'` from
+ * `RpcEcashUnit`, or any future addition to that enum an older app version
+ * doesn't know about yet — is treated as `'unsupported'` instead of
+ * silently falling through to the bitcoin (sats) path.
+ *
+ * `undefined`/`null`/`'bitcoin'` all map to `'bitcoin'` to preserve
+ * backwards compatibility with old-sender events that predate the `unit`
+ * field entirely.
+ */
+export function getPaymentUnit(content: {
+    unit?: RpcEcashUnit | string | null
+}): 'bitcoin' | 'usdt' | 'unsupported' {
+    const { unit } = content
+    if (unit == null || unit === 'bitcoin') return 'bitcoin'
+    if (unit === 'usdt') return 'usdt'
+    return 'unsupported'
+}
+
 export const makeMatrixPaymentText = ({
     t,
     event,
@@ -501,9 +525,19 @@ export const makeMatrixPaymentText = ({
         },
     } = event
 
+    const paymentUnit = getPaymentUnit(event.content)
+
+    // Unknown ecash units (anything besides 'bitcoin'/'usdt', including
+    // 'other' from RpcEcashUnit) can't be safely formatted as sats or USDT —
+    // doing so would misrepresent the amount. Show a dedicated string
+    // instead, regardless of amount/transaction/verification state.
+    if (paymentUnit === 'unsupported') {
+        return t('feature.chat.unsupported-payment-unit')
+    }
+
     // USDT-denominated payments carry the amount in USDT micros and are
     // displayed as "X.XX USDT" instead of fiat + SATS
-    if (event.content.unit === 'usdt') {
+    if (paymentUnit === 'usdt') {
         // prefer the amount verified against the actual ecash, falling back
         // to the sender-declared amount if verification hasn't
         // resolved/isn't applicable — same fallback shape as the BTC branch
@@ -636,6 +670,14 @@ export function getReceivablePaymentEvents(
         if (!isPaymentEvent(item)) return
         if (item.content.recipientId !== myId) return
         if (!item.content.federationId) return
+        // never auto-claim ecash denominated in a unit this app version
+        // doesn't understand — we don't know how to redeem it
+        if (getPaymentUnit(item.content) === 'unsupported') {
+            log.info(
+                `can't claim ecash payment ${item.content.paymentId}: unsupported ecash unit`,
+            )
+            return
+        }
         // payment is not receivable if we have not joined the federation this ecash is from or if we have joined but are still recovering
         const joinedFederation = myFederations.find(
             f => f.id === item.content.federationId,
@@ -675,6 +717,14 @@ export function getReclaimablePaymentEvents(
         if (!item.content.ecash) return
         if (item.content.status !== 'rejected') return
         if (!item.content.federationId) return
+        // never auto-reclaim ecash denominated in a unit this app version
+        // doesn't understand — we don't know how to redeem it back
+        if (getPaymentUnit(item.content) === 'unsupported') {
+            log.info(
+                `can't reclaim ecash payment ${item.content.paymentId}: unsupported ecash unit`,
+            )
+            return
+        }
         // payment is not receivable if we have not joined the federation this ecash is from or if we have joined but are still recovering
         const joinedFederation = myFederations.find(
             f => f.id === item.content.federationId,

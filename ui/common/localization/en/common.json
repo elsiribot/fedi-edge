@@ -657,6 +657,7 @@
             "unblock-user-failure": "Failed to unblock user",
             "unblock-user-success": "Successfully unblocked user",
             "unknown-member": "Unknown member",
+            "unsupported-payment-unit": "This payment uses an asset this app version doesn't support yet.",
             "upgrade-chat": "Upgrade chat",
             "upgrade-chat-guidance": "We've made Fedi chat more secure and usable for people in multiple federations",
             "upgrade-chat-item-subtitle-1": "Talk to anyone on Fedi",
