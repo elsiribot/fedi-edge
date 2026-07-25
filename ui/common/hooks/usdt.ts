@@ -1,4 +1,5 @@
-import { useCallback, useEffect } from 'react'
+import { TFunction } from 'i18next'
+import { useCallback, useEffect, useState } from 'react'
 
 import {
     refreshUsdtBalance,
@@ -8,7 +9,11 @@ import {
 import { Federation } from '../types'
 import amountUtils from '../utils/AmountUtils'
 import { makeLog } from '../utils/log'
-import { formatUsdtMicros } from '../utils/usdt'
+import {
+    formatUsdtMicros,
+    microsToDecimalString,
+    parseUsdtInput,
+} from '../utils/usdt'
 import { useIsUsdtSupported } from './federation'
 import { useFedimint } from './fedimint'
 import { useCommonDispatch, useCommonSelector } from './redux'
@@ -55,6 +60,72 @@ export const useFormatUsdtMicros = () => {
             formatUsdtMicros(micros, { ...opts, locale: currencyLocale }),
         [currencyLocale],
     )
+}
+
+/**
+ * Owns the shared amount-entry state for the USDT send/receive/chat screens
+ * (review M4): the `amountInput` string, its locale-aware parse to micros,
+ * and the insufficient-balance/error-text derivation that each of those
+ * screens was repeating. Locale threading (decimal + grouping separators)
+ * lives here so callers only deal in micros and the raw input string.
+ *
+ * `getErrorText` takes the screen's own `invalidWhen` gate (which differs -
+ * "user typed something unparseable" vs "submit was attempted") so the
+ * insufficient-balance branch is shared without changing when the
+ * invalid-amount message appears per screen.
+ */
+export const useUsdtAmountInput = (opts?: {
+    /** Balance to compare against for `hasInsufficientBalance` (default 0) */
+    balanceMicros?: number
+    /** Prefill the field from a micros amount (e.g. a scanned `?amount=`) */
+    initialMicros?: number | null
+}) => {
+    const decimalSeparator = useUsdtDecimalSeparator()
+    const groupingSeparator = useUsdtGroupingSeparator()
+
+    const [amountInput, setAmountInput] = useState(() =>
+        opts?.initialMicros
+            ? microsToDecimalString(opts.initialMicros).replace(
+                  '.',
+                  decimalSeparator,
+              )
+            : '',
+    )
+
+    const balanceMicros = opts?.balanceMicros ?? 0
+
+    // `parseUsdtInput` tolerates a transient trailing decimal separator
+    // mid-entry, e.g. "5."
+    const amountMicros = parseUsdtInput(amountInput, {
+        decimalSeparator,
+        groupingSeparator,
+    })
+    const isPositiveAmount = amountMicros !== null && amountMicros > 0
+    const hasInsufficientBalance =
+        amountMicros !== null && amountMicros > balanceMicros
+    const isAmountValid = isPositiveAmount && !hasInsufficientBalance
+
+    const getErrorText = useCallback(
+        (t: TFunction, invalidWhen: boolean): string | null =>
+            hasInsufficientBalance
+                ? t('feature.usdt.insufficient-balance')
+                : invalidWhen
+                  ? t('feature.usdt.invalid-amount')
+                  : null,
+        [hasInsufficientBalance],
+    )
+
+    return {
+        amountInput,
+        setAmountInput,
+        amountMicros,
+        isPositiveAmount,
+        hasInsufficientBalance,
+        isAmountValid,
+        decimalSeparator,
+        groupingSeparator,
+        getErrorText,
+    }
 }
 
 export const useUsdtBalance = (federationId: Federation['id']) => {

@@ -6,11 +6,9 @@ import { StyleSheet } from 'react-native'
 import { useChatPaymentPush } from '@fedi/common/hooks/chat'
 import {
     useFormatUsdtMicros,
-    useUsdtDecimalSeparator,
-    useUsdtGroupingSeparator,
+    useUsdtAmountInput,
 } from '@fedi/common/hooks/usdt'
 import { hexToRgba } from '@fedi/common/utils/color'
-import { parseUsdtInput } from '@fedi/common/utils/usdt'
 
 import { Column, Row } from '../../ui/Flex'
 import { SafeAreaContainer } from '../../ui/SafeArea'
@@ -32,34 +30,30 @@ const ChatWalletUsdt: React.FC<{
     const { t } = useTranslation()
     const { theme } = useTheme()
 
-    const [amountInput, setAmountInput] = useState('')
     const [submitAttempts, setSubmitAttempts] = useState(0)
-    const decimalSeparator = useUsdtDecimalSeparator()
-    const groupingSeparator = useUsdtGroupingSeparator()
     const formatUsdt = useFormatUsdtMicros()
 
     const { balanceMicros, isProcessing, handleRequestPayment } =
         useChatPaymentPush(t, roomId, recipientId, 'usdt')
 
-    // `parseUsdtInput` tolerates a transient trailing decimal separator
-    // mid-entry, e.g. "5."
-    const amountMicros = parseUsdtInput(amountInput, {
-        decimalSeparator,
-        groupingSeparator,
-    })
-    const hasInsufficientBalance =
-        amountMicros !== null && amountMicros > balanceMicros
-    const isAmountValid = amountMicros !== null && amountMicros > 0
+    const {
+        amountInput,
+        setAmountInput,
+        amountMicros,
+        isPositiveAmount,
+        isAmountValid,
+        getErrorText,
+    } = useUsdtAmountInput({ balanceMicros })
 
     const handleSend = () => {
         setSubmitAttempts(attempts => attempts + 1)
-        if (!isAmountValid || hasInsufficientBalance) return
+        if (!isAmountValid || amountMicros === null) return
         onSendConfirm(amountMicros)
     }
 
     const handleRequest = () => {
         setSubmitAttempts(attempts => attempts + 1)
-        if (!isAmountValid) return
+        if (!isPositiveAmount || amountMicros === null) return
         handleRequestPayment(amountMicros, onRequestSuccess)
     }
 
@@ -73,13 +67,10 @@ const ChatWalletUsdt: React.FC<{
                     amountInput={amountInput}
                     onChangeAmountInput={setAmountInput}
                     isSubmitting={isProcessing}
-                    error={
-                        hasInsufficientBalance
-                            ? t('feature.usdt.insufficient-balance')
-                            : submitAttempts > 0 && !isAmountValid
-                              ? t('feature.usdt.invalid-amount')
-                              : null
-                    }
+                    error={getErrorText(
+                        t,
+                        submitAttempts > 0 && !isPositiveAmount,
+                    )}
                     preHeader={
                         <Column gap="sm">
                             <Row gap="xs" center>

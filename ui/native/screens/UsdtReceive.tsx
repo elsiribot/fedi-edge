@@ -8,12 +8,11 @@ import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
 import {
     useFormatUsdtMicros,
-    useUsdtDecimalSeparator,
-    useUsdtGroupingSeparator,
+    useUsdtAmountInput,
 } from '@fedi/common/hooks/usdt'
 import { refreshUsdtBalance, selectPaymentFederation } from '@fedi/common/redux'
 import { makeLog } from '@fedi/common/utils/log'
-import { microsToDecimalString, parseUsdtInput } from '@fedi/common/utils/usdt'
+import { microsToDecimalString } from '@fedi/common/utils/usdt'
 
 import ReceiveQr from '../components/feature/receive/ReceiveQr'
 import { Column, Row } from '../components/ui/Flex'
@@ -33,9 +32,9 @@ const UsdtReceive: React.FC<Props> = () => {
     const toast = useToast()
     const fedimint = useFedimint()
     const dispatch = useAppDispatch()
-    const decimalSeparator = useUsdtDecimalSeparator()
-    const groupingSeparator = useUsdtGroupingSeparator()
     const formatUsdt = useFormatUsdtMicros()
+    const { amountInput, setAmountInput, amountMicros, decimalSeparator } =
+        useUsdtAmountInput()
 
     const federation = useAppSelector(selectPaymentFederation)
     const federationId = federation?.id ?? ''
@@ -46,7 +45,6 @@ const UsdtReceive: React.FC<Props> = () => {
     // `ethereum:<address>?amount=<decimal USDT>` URI in the QR
     const [requestedMicros, setRequestedMicros] = useState<number | null>(null)
     const [isEnteringAmount, setIsEnteringAmount] = useState(false)
-    const [amountInput, setAmountInput] = useState('')
 
     // Generate a fresh deposit address on mount
     useEffect(() => {
@@ -115,10 +113,6 @@ const UsdtReceive: React.FC<Props> = () => {
     }
 
     const handleConfirmRequestAmount = () => {
-        const amountMicros = parseUsdtInput(amountInput, {
-            decimalSeparator,
-            groupingSeparator,
-        })
         setRequestedMicros(
             amountMicros !== null && amountMicros > 0 ? amountMicros : null,
         )

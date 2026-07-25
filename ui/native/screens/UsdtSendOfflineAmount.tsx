@@ -8,8 +8,7 @@ import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
 import {
     useFormatUsdtMicros,
-    useUsdtDecimalSeparator,
-    useUsdtGroupingSeparator,
+    useUsdtAmountInput,
 } from '@fedi/common/hooks/usdt'
 import {
     refreshUsdtBalance,
@@ -18,7 +17,6 @@ import {
 } from '@fedi/common/redux'
 import { shouldShowInviteCode } from '@fedi/common/utils/FederationUtils'
 import { hexToRgba } from '@fedi/common/utils/color'
-import { parseUsdtInput } from '@fedi/common/utils/usdt'
 
 import { Column } from '../components/ui/Flex'
 import { SafeAreaContainer } from '../components/ui/SafeArea'
@@ -41,8 +39,6 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
     const toast = useToast()
     const fedimint = useFedimint()
     const dispatch = useAppDispatch()
-    const decimalSeparator = useUsdtDecimalSeparator()
-    const groupingSeparator = useUsdtGroupingSeparator()
     const formatUsdt = useFormatUsdtMicros()
 
     const federation = useAppSelector(selectPaymentFederation)
@@ -51,22 +47,23 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
         selectUsdtBalanceMicros(s, federationId),
     )
 
-    const [amountInput, setAmountInput] = useState('')
+    const {
+        amountInput,
+        setAmountInput,
+        amountMicros,
+        isAmountValid,
+        getErrorText,
+    } = useUsdtAmountInput({ balanceMicros })
     const [isGenerating, setIsGenerating] = useState(false)
 
-    // `parseUsdtInput` tolerates a transient trailing decimal separator
-    // mid-entry, e.g. "5."
-    const amountMicros = parseUsdtInput(amountInput, {
-        decimalSeparator,
-        groupingSeparator,
-    })
-    const hasInsufficientBalance =
-        amountMicros !== null && amountMicros > balanceMicros
-    const isAmountValid =
-        amountMicros !== null && amountMicros > 0 && !hasInsufficientBalance
-
     const handleNext = async () => {
-        if (!federationId || !isAmountValid || isGenerating) return
+        if (
+            !federationId ||
+            !isAmountValid ||
+            amountMicros === null ||
+            isGenerating
+        )
+            return
 
         setIsGenerating(true)
         try {
@@ -75,7 +72,9 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
                 federationId,
                 // embed an invite so non-members can join-then-claim,
                 // unless the federation opted out
-                federation?.meta ? shouldShowInviteCode(federation.meta) : false,
+                federation?.meta
+                    ? shouldShowInviteCode(federation.meta)
+                    : false,
             )
             dispatch(refreshUsdtBalance({ fedimint, federationId }))
             navigation.replace('UsdtSendOfflineQr', {
@@ -98,13 +97,10 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
                     amountInput={amountInput}
                     onChangeAmountInput={setAmountInput}
                     isSubmitting={isGenerating}
-                    error={
-                        hasInsufficientBalance
-                            ? t('feature.usdt.insufficient-balance')
-                            : amountInput.length > 0 && amountMicros === null
-                              ? t('feature.usdt.invalid-amount')
-                              : null
-                    }
+                    error={getErrorText(
+                        t,
+                        amountInput.length > 0 && amountMicros === null,
+                    )}
                     preHeader={
                         <Text
                             caption

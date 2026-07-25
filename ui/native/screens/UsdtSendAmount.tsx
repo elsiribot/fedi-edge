@@ -9,8 +9,7 @@ import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
 import {
     useFormatUsdtMicros,
-    useUsdtDecimalSeparator,
-    useUsdtGroupingSeparator,
+    useUsdtAmountInput,
 } from '@fedi/common/hooks/usdt'
 import {
     selectPaymentFederation,
@@ -18,11 +17,7 @@ import {
 } from '@fedi/common/redux'
 import { hexToRgba } from '@fedi/common/utils/color'
 import { makeLog } from '@fedi/common/utils/log'
-import {
-    isValidEvmAddress,
-    microsToDecimalString,
-    parseUsdtInput,
-} from '@fedi/common/utils/usdt'
+import { isValidEvmAddress } from '@fedi/common/utils/usdt'
 
 import { Column, Row } from '../components/ui/Flex'
 import { PressableIcon } from '../components/ui/PressableIcon'
@@ -45,8 +40,6 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
     const { theme } = useTheme()
     const toast = useToast()
     const fedimint = useFedimint()
-    const decimalSeparator = useUsdtDecimalSeparator()
-    const groupingSeparator = useUsdtGroupingSeparator()
     const formatUsdt = useFormatUsdtMicros()
 
     const federation = useAppSelector(selectPaymentFederation)
@@ -55,30 +48,23 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
         selectUsdtBalanceMicros(s, federationId),
     )
 
+    const {
+        amountInput,
+        setAmountInput,
+        amountMicros,
+        isAmountValid,
+        getErrorText,
+    } = useUsdtAmountInput({
+        balanceMicros,
+        initialMicros: route.params.amountMicros,
+    })
+
     const [recipient, setRecipient] = useState(route.params.recipient)
-    const [amountInput, setAmountInput] = useState(() =>
-        route.params.amountMicros
-            ? microsToDecimalString(route.params.amountMicros).replace(
-                  '.',
-                  decimalSeparator,
-              )
-            : '',
-    )
     const [feeMicros, setFeeMicros] = useState<number | null>(null)
     const [isSubmitting, setIsSubmitting] = useState(false)
 
     const trimmedRecipient = recipient.trim()
     const isRecipientValid = isValidEvmAddress(trimmedRecipient)
-    // `parseUsdtInput` itself tolerates a transient trailing decimal
-    // separator mid-entry, e.g. "5."
-    const amountMicros = parseUsdtInput(amountInput, {
-        decimalSeparator,
-        groupingSeparator,
-    })
-    const hasInsufficientBalance =
-        amountMicros !== null && amountMicros > balanceMicros
-    const isAmountValid =
-        amountMicros !== null && amountMicros > 0 && !hasInsufficientBalance
 
     // Quote the network fee whenever a valid amount is entered
     useEffect(() => {
@@ -189,13 +175,10 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
                     amountInput={amountInput}
                     onChangeAmountInput={setAmountInput}
                     isSubmitting={isSubmitting}
-                    error={
-                        hasInsufficientBalance
-                            ? t('feature.usdt.insufficient-balance')
-                            : amountInput.length > 0 && amountMicros === null
-                              ? t('feature.usdt.invalid-amount')
-                              : null
-                    }
+                    error={getErrorText(
+                        t,
+                        amountInput.length > 0 && amountMicros === null,
+                    )}
                     preHeader={
                         <Text
                             caption
