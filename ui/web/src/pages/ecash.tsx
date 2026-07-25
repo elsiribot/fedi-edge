@@ -4,10 +4,10 @@ import { Trans, useTranslation } from 'react-i18next'
 
 import { useClaimEcash, useParseEcash } from '@fedi/common/hooks/pay'
 import { useToast } from '@fedi/common/hooks/toast'
+import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import { RpcEcashInfo } from '@fedi/common/types/bindings'
 import amountUtils from '@fedi/common/utils/AmountUtils'
 import { getFederationTosUrl } from '@fedi/common/utils/FederationUtils'
-import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import { Button } from '../components/Button'
 import { ContentBlock } from '../components/ContentBlock'
@@ -24,11 +24,16 @@ import { getHashParams } from '../utils/linking'
 // Renders the ecash amount according to the unit stamped on the note.
 // `unit` is only nullable for `notJoined` (legacy, unitless) notes -- those
 // must never be rendered as "SATS", since we don't actually know the asset.
-function getEcashAmountDisplay(parsedEcash: RpcEcashInfo) {
+// `formatUsdt` is the locale-bound `useFormatUsdtMicros` formatter, threaded
+// in from the component so USDT amounts follow the user's currency locale.
+function getEcashAmountDisplay(
+    parsedEcash: RpcEcashInfo,
+    formatUsdt: (micros: number) => string,
+) {
     const { unit, amount } = parsedEcash
 
     if (unit === 'usdt') {
-        return { label: formatUsdtMicros(amount), unknownUnit: false }
+        return { label: formatUsdt(amount), unknownUnit: false }
     }
     if (unit === 'bitcoin') {
         return {
@@ -44,6 +49,7 @@ function EcashPage() {
     const { t } = useTranslation()
     const { push } = useRouter()
     const toast = useToast()
+    const formatUsdt = useFormatUsdtMicros()
 
     const [tosUrl, setTosUrl] = useState<string | null>('')
 
@@ -133,7 +139,7 @@ function EcashPage() {
             </>
         )
     } else if (newMembersDisabled) {
-        const { label, unknownUnit } = getEcashAmountDisplay(parsedEcash)
+        const { label, unknownUnit } = getEcashAmountDisplay(parsedEcash, formatUsdt)
         content = (
             <Content>
                 <Icon icon="AlertWarningTriangle" size="lg" />
@@ -156,7 +162,7 @@ function EcashPage() {
             </Button>
         )
     } else {
-        const { label, unknownUnit } = getEcashAmountDisplay(parsedEcash)
+        const { label, unknownUnit } = getEcashAmountDisplay(parsedEcash, formatUsdt)
         content = (
             <Content>
                 <Icon icon="Cash" size="lg" />

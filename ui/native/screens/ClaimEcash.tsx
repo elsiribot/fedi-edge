@@ -70,11 +70,25 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
     let content: React.ReactElement | null = null
     let actions: React.ReactElement | null = null
 
-    // mintv2 notes may be denominated in a non-Bitcoin unit (e.g. USDT)
-    const formatEcashAmount = (info: RpcEcashInfo) =>
-        info.federation_type === 'joined' && info.unit === 'usdt'
-            ? formatUsdt(info.amount)
-            : `${amountUtils.msatToSatString(info.amount)} SATS`
+    // Renders the ecash amount according to the unit stamped on the note,
+    // branching on `unit` alone (NOT `federation_type`): a joined-vs-notJoined
+    // USDT note is still USDT. `usdt` renders as USDT; `other`/unrecognized is
+    // an asset we can't safely denominate, so we render the bare amount, flag
+    // `unknownUnit` (the caller shows an unsupported-asset notice and disables
+    // the claim button), and never render it as SATS. `bitcoin` or `null`
+    // (legacy v1/unitless notes, which are genuinely Bitcoin) render as SATS.
+    const getEcashAmountDisplay = (info: RpcEcashInfo) => {
+        if (info.unit === 'usdt') {
+            return { label: formatUsdt(info.amount), unknownUnit: false }
+        }
+        if (info.unit === 'other') {
+            return { label: `${info.amount}`, unknownUnit: true }
+        }
+        return {
+            label: `${amountUtils.msatToSatString(info.amount)} SATS`,
+            unknownUnit: false,
+        }
+    }
 
     const style = styles(theme)
 
@@ -129,10 +143,16 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
             </>
         )
     } else if (newMembersDisabled) {
+        const { label, unknownUnit } = getEcashAmountDisplay(parsedEcash)
         content = (
             <>
                 <SvgImage name="AlertWarningTriangle" size={48} />
-                <Text h2>{formatEcashAmount(parsedEcash)}</Text>
+                <Text h2>{label}</Text>
+                {unknownUnit && (
+                    <Text center style={style.wrapperTextDesc}>
+                        {t('feature.ecash.unknown-asset-notice')}
+                    </Text>
+                )}
                 <Text center>
                     {t('feature.ecash.claim-ecash-new-members-disabled')}
                 </Text>
@@ -146,10 +166,16 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
             </Button>
         )
     } else {
+        const { label, unknownUnit } = getEcashAmountDisplay(parsedEcash)
         content = (
             <>
                 <SvgImage name="Cash" size={48} />
-                <Text h2>{formatEcashAmount(parsedEcash)}</Text>
+                <Text h2>{label}</Text>
+                {unknownUnit && (
+                    <Text center style={style.wrapperTextDesc}>
+                        {t('feature.ecash.unknown-asset-notice')}
+                    </Text>
+                )}
                 <Text center>{t('feature.ecash.claim-ecash-description')}</Text>
             </>
         )
@@ -201,14 +227,16 @@ const ClaimEcash: React.FC<Props> = ({ navigation, route }) => {
                     </Column>
                 )}
 
-                <Button
-                    testID="claim-ecash-button"
-                    fullWidth
-                    loading={claiming}
-                    disabled={claiming}
-                    onPress={() => claimEcash(parsedEcash, ecashToken)}>
-                    {t('feature.ecash.claim-ecash')}
-                </Button>
+                {!unknownUnit && (
+                    <Button
+                        testID="claim-ecash-button"
+                        fullWidth
+                        loading={claiming}
+                        disabled={claiming}
+                        onPress={() => claimEcash(parsedEcash, ecashToken)}>
+                        {t('feature.ecash.claim-ecash')}
+                    </Button>
+                )}
                 <Button
                     fullWidth
                     type="clear"

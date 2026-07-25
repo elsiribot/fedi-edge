@@ -46,6 +46,7 @@ const ConfirmReceiveOffline: React.FC<Props> = ({
     const fedimint = useFedimint()
     const { ecash } = route.params
     const [parsedEcash, setParsedEcash] = useState<RpcEcashInfo | null>(null)
+    const [isUnsupported, setIsUnsupported] = useState(false)
     const [receiving, setReceiving] = useState(false)
 
     const isOffline = useAppSelector(selectIsInternetUnreachable)
@@ -115,14 +116,23 @@ const ConfirmReceiveOffline: React.FC<Props> = ({
         dispatch(parseEcash({ fedimint, ecash }))
             .unwrap()
             .then(parsed => {
-                // This screen's amounts and fees are Bitcoin-denominated;
-                // USDT notes are handled by the unit-aware claim flow.
-                if (
-                    parsed.federation_type === 'joined' &&
-                    parsed.unit === 'usdt'
-                ) {
-                    navigation.replace('ClaimEcash', { id: ecash })
-                    return
+                // This screen's amounts and fees are Bitcoin-denominated, so
+                // it only handles genuinely-Bitcoin notes (`bitcoin`, or the
+                // legacy `null` unit). Branch on unit alone:
+                // - `usdt` is handled by the unit-aware claim flow.
+                // - `other`/unrecognized is an asset we can't denominate or
+                //   redeem via the bitcoin receiveEcash path, so reject it
+                //   screen-side (never render sats, never dispatch BTC
+                //   receiveEcash) with an unsupported-asset notice.
+                if (parsed.federation_type === 'joined') {
+                    if (parsed.unit === 'usdt') {
+                        navigation.replace('ClaimEcash', { id: ecash })
+                        return
+                    }
+                    if (parsed.unit === 'other') {
+                        setIsUnsupported(true)
+                        return
+                    }
                 }
                 setParsedEcash(parsed)
             })
@@ -145,6 +155,29 @@ const ConfirmReceiveOffline: React.FC<Props> = ({
     const amountSats = amountUtils.msatToSat(amount)
 
     const style = styles(theme)
+
+    // The note is denominated in an asset this app version can't accept via
+    // the bitcoin receiveEcash path; render a rejection instead of a
+    // (misleading) sats amount + receive button.
+    if (isUnsupported) {
+        return (
+            <SafeAreaContainer edges="notop" style={style.container}>
+                <Column grow center gap="lg">
+                    <SvgImage name="AlertWarningTriangle" size={48} />
+                    <Text center>
+                        {t('feature.chat.unsupported-payment-unit')}
+                    </Text>
+                </Column>
+                <Column fullWidth>
+                    <Button
+                        fullWidth
+                        title={t('words.cancel')}
+                        onPress={() => navigation.goBack()}
+                    />
+                </Column>
+            </SafeAreaContainer>
+        )
+    }
 
     return (
         <SafeAreaContainer edges="notop" style={style.container}>

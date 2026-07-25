@@ -535,6 +535,16 @@ export function useClaimEcash() {
                     // thunk (mirrors claimMatrixPayment in redux/matrix.ts).
                     await fedimint.usdtReceiveEcash(decodedEcash, federationId)
                     dispatch(refreshUsdtBalance({ fedimint, federationId }))
+                } else if (parsedEcash.unit === 'other') {
+                    // Unrecognized unit: we can't redeem it via the bitcoin
+                    // receiveEcash path (it would misread the amount and fail
+                    // to parse the note), so reject with a clear error rather
+                    // than falling through to the else-branch below. Surfaces
+                    // to the claim UIs via `isError`. (`null` is legacy
+                    // unitless = genuinely bitcoin and takes the else-branch.)
+                    throw new Error(
+                        'Cannot claim e-cash denominated in an unsupported asset',
+                    )
                 } else {
                     const result = await dispatch(
                         receiveEcash({
