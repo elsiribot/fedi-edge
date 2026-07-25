@@ -236,14 +236,20 @@ export const displayPaymentReceivedNotification = async (
     // denomination is unknown/unstamped - there's no safe way to guess its
     // magnitude, so skip the notification entirely rather than show a
     // wildly-wrong amount.
-    const amountText = formatNotificationAmount(transaction)
-    if (amountText === undefined) {
+    const amount = formatNotificationAmount(transaction)
+    if (amount === undefined) {
         log.warn(
             'Skipping payment-received notification for unknown-unit transaction',
             transaction.id,
         )
         return
     }
+
+    // "sats" is a translatable word (varies per locale); "USDT" is a
+    // currency code and is intentionally left untranslated, matching
+    // `formatUsdtMicros`'s own hardcoded " USDT" suffix.
+    const unitLabel = amount.unit === 'usdt' ? 'USDT' : t('words.sats')
+    const amountText = `${amount.formattedNumber} ${unitLabel}`
 
     await dispatchPaymentReceivedNotification(
         event.federationId,
@@ -275,6 +281,10 @@ export const displayUsdtDepositReceivedNotification = async (
     event: UsdtDepositEvent,
     t: TFunction,
 ): Promise<void> => {
+    // Intentionally duplicates the "until claimed" guard above rather than
+    // sharing it: `event.state` here is `UsdtDepositEvent`'s state, a
+    // different type from `TransactionListEntry`'s, so there's no common
+    // helper to extract without adding an artificial shared type.
     if (event.state.type !== 'claimed') return
 
     const body = t('feature.usdt.deposit-received-notification', {
