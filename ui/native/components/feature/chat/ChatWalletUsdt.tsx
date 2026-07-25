@@ -3,7 +3,7 @@ import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { StyleSheet } from 'react-native'
 
-import { useChatUsdtPayment } from '@fedi/common/hooks/chat'
+import { useChatPaymentPush } from '@fedi/common/hooks/chat'
 import {
     useFormatUsdtMicros,
     useUsdtDecimalSeparator,
@@ -38,8 +38,8 @@ const ChatWalletUsdt: React.FC<{
     const groupingSeparator = useUsdtGroupingSeparator()
     const formatUsdt = useFormatUsdtMicros()
 
-    const { balanceMicros, isProcessing, handleRequestUsdtPayment } =
-        useChatUsdtPayment(t, roomId, recipientId)
+    const { balanceMicros, isProcessing, handleRequestPayment } =
+        useChatPaymentPush(t, roomId, recipientId, 'usdt')
 
     // `parseUsdtInput` tolerates a transient trailing decimal separator
     // mid-entry, e.g. "5."
@@ -60,7 +60,7 @@ const ChatWalletUsdt: React.FC<{
     const handleRequest = () => {
         setSubmitAttempts(attempts => attempts + 1)
         if (!isAmountValid) return
-        handleRequestUsdtPayment(amountMicros, onRequestSuccess)
+        handleRequestPayment(amountMicros, onRequestSuccess)
     }
 
     const style = styles(theme)

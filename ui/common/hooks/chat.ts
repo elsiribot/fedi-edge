@@ -2,6 +2,7 @@ import { TFunction } from 'i18next'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import type { MatrixPaymentEvent, Sats } from '@fedi/common/types'
+import type { RpcEcashUnit, RpcUsdtAmount } from '@fedi/common/types/bindings'
 
 import { INVALID_NAME_PLACEHOLDER } from '../constants/matrix'
 import {
@@ -17,8 +18,6 @@ import {
     selectUsdtBalanceMicros,
     sendMatrixPaymentPush,
     sendMatrixPaymentRequest,
-    sendMatrixUsdtPaymentPush,
-    sendMatrixUsdtPaymentRequest,
     setChatDraft,
     setLastUsedFederationId,
     setMatrixDisplayName,
@@ -133,20 +132,35 @@ export function usePublishNotificationToken(
     return null
 }
 
+/**
+ * Utilities for pushing (sending) / requesting an ecash payment in chat.
+ * Defaults to a bitcoin (sats-denominated) payment; pass `unit: 'usdt'` when
+ * the selected payment federation's ecash is USDT-denominated (USDT-only
+ * federation), in which case amounts are in USDT micros (10^-6 USDT) and
+ * USDT ecash payments have no Fedi fees.
+ */
 export const useChatPaymentPush = (
     t: TFunction,
-    roomId: string,
+    roomId: string | undefined,
     recipientId: string,
+    unit: RpcEcashUnit = 'bitcoin',
 ) => {
     const toast = useToast()
     const dispatch = useCommonDispatch()
     const fedimint = useFedimint()
     const payFromFederation = useCommonSelector(selectPaymentFederation)
     const federationId = payFromFederation?.id || ''
+    const balanceMicros = useCommonSelector(s =>
+        selectUsdtBalanceMicros(s, federationId),
+    )
     const [isProcessing, setIsProcessing] = useState<boolean>(false)
 
     const handleSendPayment = useCallback(
-        async (amount: Sats, onSuccess: () => void, notes?: string) => {
+        async (
+            amount: Sats | RpcUsdtAmount,
+            onSuccess: () => void,
+            notes?: string,
+        ) => {
             if (!federationId || !roomId || !amount) return
             setIsProcessing(true)
             try {
@@ -157,6 +171,7 @@ export const useChatPaymentPush = (
                         roomId,
                         recipientId,
                         amount,
+                        unit,
                         notes,
                     }),
                 ).unwrap()
@@ -167,74 +182,32 @@ export const useChatPaymentPush = (
             }
             setIsProcessing(false)
         },
-        [dispatch, federationId, fedimint, recipientId, roomId, t, toast],
+        [
+            dispatch,
+            federationId,
+            fedimint,
+            recipientId,
+            roomId,
+            t,
+            toast,
+            unit,
+        ],
     )
 
-    return {
-        isProcessing,
-        handleSendPayment,
-    }
-}
-
-/**
- * Utilities for sending / requesting USDT-denominated ecash payments in
- * chat. Used when the selected payment federation's ecash is
- * USDT-denominated (USDT-only federation). Amounts are in USDT micros
- * (10^-6 USDT). USDT ecash payments have no Fedi fees.
- */
-export const useChatUsdtPayment = (
-    t: TFunction,
-    roomId: string | undefined,
-    recipientId: string,
-) => {
-    const toast = useToast()
-    const dispatch = useCommonDispatch()
-    const fedimint = useFedimint()
-    const paymentFederation = useCommonSelector(selectPaymentFederation)
-    const federationId = paymentFederation?.id || ''
-    const balanceMicros = useCommonSelector(s =>
-        selectUsdtBalanceMicros(s, federationId),
-    )
-    const [isProcessing, setIsProcessing] = useState<boolean>(false)
-
-    const handleSendUsdtPayment = useCallback(
-        async (amountMicros: number, onSuccess: () => void, notes?: string) => {
-            if (!federationId || !roomId || !amountMicros) return
-            setIsProcessing(true)
-            try {
-                await dispatch(
-                    sendMatrixUsdtPaymentPush({
-                        fedimint,
-                        federationId,
-                        roomId,
-                        recipientId,
-                        amountMicros,
-                        notes,
-                    }),
-                ).unwrap()
-                dispatch(setLastUsedFederationId(federationId))
-                onSuccess()
-            } catch (err) {
-                toast.error(t, err, 'errors.unknown-error')
-            }
-            setIsProcessing(false)
-        },
-        [dispatch, federationId, fedimint, recipientId, roomId, t, toast],
-    )
-
-    const handleRequestUsdtPayment = useCallback(
-        async (amountMicros: number, onSuccess: () => void) => {
+    const handleRequestPayment = useCallback(
+        async (amount: Sats | RpcUsdtAmount, onSuccess: () => void) => {
             if (!federationId)
                 return toast.error(t, 'errors.please-join-a-federation')
-            if (!roomId || !amountMicros) return
+            if (!roomId || !amount) return
             setIsProcessing(true)
             try {
                 await dispatch(
-                    sendMatrixUsdtPaymentRequest({
+                    sendMatrixPaymentRequest({
                         fedimint,
                         federationId,
                         roomId,
-                        amountMicros,
+                        amount,
+                        unit,
                     }),
                 ).unwrap()
                 onSuccess()
@@ -243,15 +216,15 @@ export const useChatUsdtPayment = (
             }
             setIsProcessing(false)
         },
-        [dispatch, federationId, fedimint, roomId, t, toast],
+        [dispatch, federationId, fedimint, roomId, t, toast, unit],
     )
 
     return {
         federationId,
         balanceMicros,
         isProcessing,
-        handleSendUsdtPayment,
-        handleRequestUsdtPayment,
+        handleSendPayment,
+        handleRequestPayment,
     }
 }
 

@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next'
 import { StyleSheet } from 'react-native'
 
 import { useAmountFormatter, useBalance } from '@fedi/common/hooks/amount'
-import { useChatPaymentPush, useChatUsdtPayment } from '@fedi/common/hooks/chat'
+import { useChatPaymentPush } from '@fedi/common/hooks/chat'
 import { useCommonSelector } from '@fedi/common/hooks/redux'
 import {
     useEcashFeeDetails,
@@ -18,6 +18,7 @@ import {
     selectPaymentFederation,
 } from '@fedi/common/redux'
 import { Sats } from '@fedi/common/types'
+import { RpcEcashUnit } from '@fedi/common/types/bindings'
 import amountUtils from '@fedi/common/utils/AmountUtils'
 
 import ChatAvatar from '../components/feature/chat/ChatAvatar'
@@ -45,7 +46,8 @@ const ConfirmSendChatPayment: React.FC<Props> = ({ route, navigation }) => {
 
     if (params.unit === 'usdt') {
         return (
-            <ConfirmSendChatPaymentUsdt
+            <ConfirmSendChatPaymentInner
+                unit="usdt"
                 amountMicros={params.amountMicros}
                 roomId={params.roomId}
                 notes={params.notes}
@@ -55,7 +57,8 @@ const ConfirmSendChatPayment: React.FC<Props> = ({ route, navigation }) => {
     }
 
     return (
-        <ConfirmSendChatPaymentBtc
+        <ConfirmSendChatPaymentInner
+            unit="bitcoin"
             amount={params.amount}
             roomId={params.roomId}
             notes={params.notes}
@@ -64,12 +67,32 @@ const ConfirmSendChatPayment: React.FC<Props> = ({ route, navigation }) => {
     )
 }
 
-const ConfirmSendChatPaymentBtc: React.FC<{
-    amount: Sats
+/**
+ * Confirmation screen for an in-chat ecash payment push. Defaults to a
+ * bitcoin (sats-denominated) payment with fee estimation; when
+ * `unit === 'usdt'`, `amountMicros` (USDT micros) is used instead, no fee
+ * estimation is performed (USDT ecash has no Fedi fees), and the balance /
+ * amount rendering uses the USDT-specific display.
+ */
+const ConfirmSendChatPaymentInner: React.FC<{
+    unit: RpcEcashUnit
+    amount?: Sats
+    amountMicros?: number
     roomId: string
     notes?: string
     navigation: Props['navigation']
-}> = ({ amount, roomId, notes: initialNotes, navigation }) => {
+}> = ({
+    unit,
+    amount: btcAmountProp,
+    amountMicros: usdtAmountMicrosProp,
+    roomId,
+    notes: initialNotes,
+    navigation,
+}) => {
+    const isUsdt = unit === 'usdt'
+    const btcAmount = (btcAmountProp ?? (0 as Sats)) as Sats
+    const usdtAmountMicros = usdtAmountMicrosProp ?? 0
+
     const { theme } = useTheme()
     const { t } = useTranslation()
     const [showFeeBreakdown, setShowFeeBreakdown] = useState<boolean>(false)
@@ -77,7 +100,7 @@ const ConfirmSendChatPaymentBtc: React.FC<{
     const paymentFederation = useAppSelector(selectPaymentFederation)
     const { feeBreakdownTitle, ecashFeesGuidanceText, makeEcashFeeContent } =
         useFeeDisplayUtils(t, paymentFederation?.id || '')
-    const amountMsats = amountUtils.satToMsat(amount)
+    const amountMsats = amountUtils.satToMsat(btcAmount)
     const feeDetails = useEcashFeeDetails(amountMsats, paymentFederation?.id)
     const { formattedTotalFee, feeItemsBreakdown, formattedTotalAmount } =
         makeEcashFeeContent(amountMsats, feeDetails)
@@ -90,25 +113,37 @@ const ConfirmSendChatPaymentBtc: React.FC<{
         federationId: paymentFederation?.id,
     })
     const { formattedPrimaryAmount, formattedSecondaryAmount } =
-        makeFormattedAmountsFromSats(amount)
+        makeFormattedAmountsFromSats(btcAmount)
+    const formatUsdt = useFormatUsdtMicros()
+    const formattedUsdtAmount = formatUsdt(usdtAmountMicros)
 
     const existingRoom = useAppSelector(s => selectMatrixRoom(s, roomId))
-    const { isProcessing, handleSendPayment } = useChatPaymentPush(
-        t,
-        roomId,
-        existingRoom?.directUserId || '',
-    )
+    const { balanceMicros, isProcessing, handleSendPayment } =
+        useChatPaymentPush(
+            t,
+            roomId,
+            existingRoom?.directUserId || '',
+            unit,
+        )
 
     const onSend = useCallback(async () => {
         handleSendPayment(
-            amount,
+            isUsdt ? usdtAmountMicros : btcAmount,
             () => {
                 // go back to DirectChat to show sent payment
                 navigation.dispatch(resetToDirectChat(roomId))
             },
             notes,
         )
-    }, [amount, handleSendPayment, navigation, notes, roomId])
+    }, [
+        btcAmount,
+        handleSendPayment,
+        isUsdt,
+        navigation,
+        notes,
+        roomId,
+        usdtAmountMicros,
+    ])
 
     const style = styles(theme)
 
@@ -117,12 +152,43 @@ const ConfirmSendChatPaymentBtc: React.FC<{
             <FederationWalletSelector fullWidth />
             <Column style={style.content} fullWidth align="center" grow>
                 <Column style={style.amountContainer} align="center" fullWidth>
-                    <PaymentType type="ecash" />
-                    <SendAmounts
-                        balanceDisplay={formattedBalanceText}
-                        formattedPrimaryAmount={formattedPrimaryAmount}
-                        formattedSecondaryAmount={formattedSecondaryAmount}
-                    />
+                    {isUsdt ? (
+                        <>
+                            <Row center gap="xs">
+                                {/* Official Tether mark carries its own colors, no tint */}
+                                <SvgImage name="UsdtCircle" size={16} />
+                                <Text bold caption>
+                                    {t('feature.usdt.usdt-balance')}
+                                </Text>
+                            </Row>
+                            <SendAmounts
+                                balanceDisplay={t(
+                                    'feature.wallet.available-balance-amount',
+                                    { amount: formatUsdt(balanceMicros) },
+                                )}
+                                formattedPrimaryAmount={
+                                    <Text
+                                        h1
+                                        medium
+                                        numberOfLines={1}
+                                        style={style.usdtAmount}>
+                                        {formattedUsdtAmount}
+                                    </Text>
+                                }
+                            />
+                        </>
+                    ) : (
+                        <>
+                            <PaymentType type="ecash" />
+                            <SendAmounts
+                                balanceDisplay={formattedBalanceText}
+                                formattedPrimaryAmount={formattedPrimaryAmount}
+                                formattedSecondaryAmount={
+                                    formattedSecondaryAmount
+                                }
+                            />
+                        </>
+                    )}
                 </Column>
                 <Column fullWidth>
                     {existingRoom && (
@@ -155,168 +221,59 @@ const ConfirmSendChatPaymentBtc: React.FC<{
                         </>
                     )}
                     <Column style={style.itemGroup} gap="md">
-                        <Row align="center" justify="between">
-                            <Text caption>{t('words.amount')}</Text>
-                            <Text caption medium>
-                                {formattedPrimaryAmount}
-                            </Text>
-                        </Row>
-                        <Row align="center" justify="between">
-                            <Text caption>{t('words.fees')}</Text>
-                            <Row align="center" gap="xs">
-                                <Text caption medium>
-                                    {formattedTotalFee}
-                                </Text>
-                                <PressableIcon
-                                    svgName="Info"
-                                    onPress={() => setShowFeeBreakdown(true)}
-                                    svgProps={{
-                                        size: 16,
-                                        color: theme.colors.grey,
-                                    }}
-                                />
-                            </Row>
-                        </Row>
-                        <Row align="center" justify="between">
-                            <Text caption bold>
-                                {t('words.total')}
-                            </Text>
-                            <Text caption bold>
-                                {formattedTotalAmount}
-                            </Text>
-                        </Row>
-                    </Column>
-                    <Divider />
-                    <Column style={style.itemGroup}>
-                        <NotesInput notes={notes} setNotes={setNotes} />
-                    </Column>
-                </Column>
-            </Column>
-            <Button
-                title={t('words.send')}
-                onPress={onSend}
-                disabled={isProcessing}
-                fullWidth
-            />
-            <FeeOverlay
-                show={showFeeBreakdown}
-                onDismiss={() => setShowFeeBreakdown(false)}
-                title={feeBreakdownTitle}
-                feeItems={feeItemsBreakdown}
-                description={ecashFeesGuidanceText}
-            />
-        </SafeAreaContainer>
-    )
-}
-
-/**
- * Confirmation screen for a USDT-denominated in-chat ecash payment.
- * Amounts are in USDT micros. USDT ecash payments have no Fedi fees,
- * so no fee estimation is performed.
- */
-const ConfirmSendChatPaymentUsdt: React.FC<{
-    amountMicros: number
-    roomId: string
-    notes?: string
-    navigation: Props['navigation']
-}> = ({ amountMicros, roomId, notes: initialNotes, navigation }) => {
-    const { theme } = useTheme()
-    const { t } = useTranslation()
-    const [notes, setNotes] = useState(initialNotes ?? '')
-    const formatUsdt = useFormatUsdtMicros()
-
-    const existingRoom = useAppSelector(s => selectMatrixRoom(s, roomId))
-    const { balanceMicros, isProcessing, handleSendUsdtPayment } =
-        useChatUsdtPayment(t, roomId, existingRoom?.directUserId || '')
-
-    const formattedAmount = formatUsdt(amountMicros)
-
-    const onSend = useCallback(async () => {
-        handleSendUsdtPayment(
-            amountMicros,
-            () => {
-                // go back to DirectChat to show sent payment
-                navigation.dispatch(resetToDirectChat(roomId))
-            },
-            notes,
-        )
-    }, [amountMicros, handleSendUsdtPayment, navigation, notes, roomId])
-
-    const style = styles(theme)
-
-    return (
-        <SafeAreaContainer style={style.container} edges="notop">
-            <FederationWalletSelector fullWidth />
-            <Column style={style.content} fullWidth align="center" grow>
-                <Column style={style.amountContainer} align="center" fullWidth>
-                    <Row center gap="xs">
-                        {/* Official Tether mark carries its own colors, no tint */}
-                        <SvgImage name="UsdtCircle" size={16} />
-                        <Text bold caption>
-                            {t('feature.usdt.usdt-balance')}
-                        </Text>
-                    </Row>
-                    <SendAmounts
-                        balanceDisplay={t(
-                            'feature.wallet.available-balance-amount',
-                            { amount: formatUsdt(balanceMicros) },
+                        {isUsdt ? (
+                            <>
+                                <Row align="center" justify="between">
+                                    <Text caption>{t('words.amount')}</Text>
+                                    <Text caption medium>
+                                        {formattedUsdtAmount}
+                                    </Text>
+                                </Row>
+                                <Row align="center" justify="between">
+                                    <Text caption bold>
+                                        {t('words.total')}
+                                    </Text>
+                                    <Text caption bold>
+                                        {formattedUsdtAmount}
+                                    </Text>
+                                </Row>
+                            </>
+                        ) : (
+                            <>
+                                <Row align="center" justify="between">
+                                    <Text caption>{t('words.amount')}</Text>
+                                    <Text caption medium>
+                                        {formattedPrimaryAmount}
+                                    </Text>
+                                </Row>
+                                <Row align="center" justify="between">
+                                    <Text caption>{t('words.fees')}</Text>
+                                    <Row align="center" gap="xs">
+                                        <Text caption medium>
+                                            {formattedTotalFee}
+                                        </Text>
+                                        <PressableIcon
+                                            svgName="Info"
+                                            onPress={() =>
+                                                setShowFeeBreakdown(true)
+                                            }
+                                            svgProps={{
+                                                size: 16,
+                                                color: theme.colors.grey,
+                                            }}
+                                        />
+                                    </Row>
+                                </Row>
+                                <Row align="center" justify="between">
+                                    <Text caption bold>
+                                        {t('words.total')}
+                                    </Text>
+                                    <Text caption bold>
+                                        {formattedTotalAmount}
+                                    </Text>
+                                </Row>
+                            </>
                         )}
-                        formattedPrimaryAmount={
-                            <Text
-                                h1
-                                medium
-                                numberOfLines={1}
-                                style={style.usdtAmount}>
-                                {formattedAmount}
-                            </Text>
-                        }
-                    />
-                </Column>
-                <Column fullWidth>
-                    {existingRoom && (
-                        <>
-                            <Row
-                                align="center"
-                                justify="between"
-                                style={style.item}>
-                                <Text caption bold>
-                                    {t('feature.send.send-to')}
-                                </Text>
-                                <Row align="center" gap="sm">
-                                    <ChatAvatar
-                                        user={{
-                                            ...existingRoom,
-                                            displayName:
-                                                existingRoom.name ?? '',
-                                            avatarUrl:
-                                                existingRoom.avatarUrl ??
-                                                undefined,
-                                        }}
-                                        size={AvatarSize.sm}
-                                    />
-                                    <Text caption medium>
-                                        {existingRoom.name}
-                                    </Text>
-                                </Row>
-                            </Row>
-                            <Divider />
-                        </>
-                    )}
-                    <Column style={style.itemGroup} gap="md">
-                        <Row align="center" justify="between">
-                            <Text caption>{t('words.amount')}</Text>
-                            <Text caption medium>
-                                {formattedAmount}
-                            </Text>
-                        </Row>
-                        <Row align="center" justify="between">
-                            <Text caption bold>
-                                {t('words.total')}
-                            </Text>
-                            <Text caption bold>
-                                {formattedAmount}
-                            </Text>
-                        </Row>
                     </Column>
                     <Divider />
                     <Column style={style.itemGroup}>
@@ -330,6 +287,15 @@ const ConfirmSendChatPaymentUsdt: React.FC<{
                 disabled={isProcessing}
                 fullWidth
             />
+            {!isUsdt && (
+                <FeeOverlay
+                    show={showFeeBreakdown}
+                    onDismiss={() => setShowFeeBreakdown(false)}
+                    title={feeBreakdownTitle}
+                    feeItems={feeItemsBreakdown}
+                    description={ecashFeesGuidanceText}
+                />
+            )}
         </SafeAreaContainer>
     )
 }

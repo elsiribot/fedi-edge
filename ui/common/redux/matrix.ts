@@ -68,6 +68,7 @@ import {
     MultispendListedEvent,
     NetworkError,
     RpcBackPaginationStatus,
+    RpcEcashUnit,
     RpcMentions,
     RpcFormResponse,
     RpcMultispendGroupStatus,
@@ -1573,6 +1574,13 @@ export const sendMatrixFormResponse = createAsyncThunk<
     },
 )
 
+/**
+ * Push (send) an ecash payment in chat. Defaults to a bitcoin
+ * (sats-denominated) payment; when `unit === 'usdt'`, `amount` is
+ * interpreted as USDT micros (10^-6 USDT), ecash is generated via the USDT
+ * module (no Fedi fees, so no fee estimation), and the message is stamped
+ * with `unit: 'usdt'`.
+ */
 export const sendMatrixPaymentPush = createAsyncThunk<
     string,
     {
@@ -1580,129 +1588,21 @@ export const sendMatrixPaymentPush = createAsyncThunk<
         federationId: string
         roomId: MatrixRoom['id']
         recipientId: MatrixUser['id']
-        amount: Sats
+        amount: Sats | RpcUsdtAmount
+        unit?: RpcEcashUnit
         notes?: string
     },
     { state: CommonState }
 >(
     'matrix/sendMatrixPaymentPush',
     async (
-        { fedimint, federationId, roomId, recipientId, amount, notes = null },
-        { getState },
-    ) => {
-        const state = getState()
-        const federation = selectLoadedFederation(state, federationId)
-        const matrixAuth = selectMatrixAuth(state)
-        if (!matrixAuth) throw new Error('Not authenticated')
-        if (!federation) throw new Error('Federation not found')
-
-        log.info('sendMatrixPaymentPush', amount, 'sats')
-
-        const msats = amountUtils.satToMsat(amount)
-        const client = fedimint.getMatrixClient()
-        const includeInvite = shouldShowInviteCode(federation.meta)
-
-        const frontendMetadata = {
-            recipientMatrixId: recipientId,
-            senderMatrixId: matrixAuth.userId,
-            initialNotes: notes,
-        } satisfies FrontendMetadata
-
-        const { ecash, operationId } = await fedimint.generateEcash(
-            msats,
-            federationId,
-            includeInvite,
-            frontendMetadata,
-        )
-
-        const senderOperationId = operationId
-        const paymentId = uuidv4()
-
-        await fedimint.updateTransactionNotes(
-            operationId,
-            notes || '',
-            federationId,
-        )
-
-        await client.sendMessage(roomId, {
-            msgtype: 'xyz.fedi.payment',
-            body: `Sent payment of ${amountUtils.formatSats(amount)} SATS. Use the Fedi app to accept this payment.`, // TODO: i18n? this only shows to matrix clients, not Fedi users
-            status: 'pushed',
-            paymentId,
-            senderOperationId,
-            senderId: matrixAuth.userId,
-            recipientId,
-            amount: msats,
-            ecash,
-            federationId: federation.id,
-            // lets non-member recipients join-then-claim
-            ...(includeInvite ? { inviteCode: federation.inviteCode } : {}),
-        })
-
-        return senderOperationId
-    },
-)
-
-export const sendMatrixPaymentRequest = createAsyncThunk<
-    void,
-    {
-        fedimint: FedimintBridge
-        federationId: string
-        roomId: MatrixRoom['id']
-        amount: Sats
-    },
-    { state: CommonState }
->(
-    'matrix/sendMatrixDirectPaymentRequestMessage',
-    async ({ fedimint, federationId, roomId, amount }, { getState }) => {
-        const matrixAuth = selectMatrixAuth(getState())
-        if (!matrixAuth) throw new Error('Not authenticated')
-
-        log.info('sendMatrixPaymentRequest', amount, 'sats')
-
-        const msats = amountUtils.satToMsat(amount)
-        const client = fedimint.getMatrixClient()
-
-        const paymentId = uuidv4()
-
-        await client.sendMessage(roomId, {
-            msgtype: 'xyz.fedi.payment',
-            body: `Requested payment of ${amountUtils.formatSats(amount)} SATS. Use the Fedi app to complete this request.`, // TODO: i18n?
-            paymentId,
-            status: 'requested',
-            recipientId: matrixAuth.userId,
-            amount: msats,
-            federationId,
-        })
-    },
-)
-
-/**
- * Push (send) a USDT-denominated ecash payment in chat. Mirrors
- * `sendMatrixPaymentPush`, but generates USDT ecash and denominates
- * `amount` in USDT micros (10^-6 USDT) with `unit: 'usdt'`.
- * USDT ecash has no Fedi fees, so no fee estimation is involved.
- */
-export const sendMatrixUsdtPaymentPush = createAsyncThunk<
-    string,
-    {
-        fedimint: FedimintBridge
-        federationId: string
-        roomId: MatrixRoom['id']
-        recipientId: MatrixUser['id']
-        amountMicros: RpcUsdtAmount
-        notes?: string
-    },
-    { state: CommonState }
->(
-    'matrix/sendMatrixUsdtPaymentPush',
-    async (
         {
             fedimint,
             federationId,
             roomId,
             recipientId,
-            amountMicros,
+            amount,
+            unit = 'bitcoin',
             notes = null,
         },
         { getState, dispatch },
@@ -1713,9 +1613,8 @@ export const sendMatrixUsdtPaymentPush = createAsyncThunk<
         if (!matrixAuth) throw new Error('Not authenticated')
         if (!federation) throw new Error('Federation not found')
 
-        log.info('sendMatrixUsdtPaymentPush', amountMicros, 'micros')
-
         const client = fedimint.getMatrixClient()
+        const includeInvite = shouldShowInviteCode(federation.meta)
 
         const frontendMetadata = {
             recipientMatrixId: recipientId,
@@ -1723,82 +1622,130 @@ export const sendMatrixUsdtPaymentPush = createAsyncThunk<
             initialNotes: notes,
         } satisfies FrontendMetadata
 
-        const { ecash, operationId } = await fedimint.usdtGenerateEcash(
-            amountMicros,
-            federationId,
-            shouldShowInviteCode(federation.meta),
-            frontendMetadata,
-        )
+        let senderOperationId: string
+        let messageAmount: number
+        let ecash: string
+        let body: string
 
-        const senderOperationId = operationId
-        const paymentId = uuidv4()
+        if (unit === 'usdt') {
+            log.info('sendMatrixPaymentPush', amount, 'micros')
 
-        await client.sendMessage(roomId, {
-            msgtype: 'xyz.fedi.payment',
-            // Locale-less, mirroring the BTC branch above
+            const result = await fedimint.usdtGenerateEcash(
+                amount,
+                federationId,
+                includeInvite,
+                frontendMetadata,
+            )
+            ecash = result.ecash
+            senderOperationId = result.operationId
+            messageAmount = amount
+
+            // Locale-less, mirroring the BTC branch below
             // (`amountUtils.formatSats`, which has no `locale` param at
             // all) - this thunk has no React context to pull
             // `selectCurrencyLocale` from without threading it through
             // every caller just for this message body.
-            body: `Sent payment of ${formatUsdtMicros(amountMicros)}. Use the Fedi app to accept this payment.`, // TODO: i18n? this only shows to matrix clients, not Fedi users
+            body = `Sent payment of ${formatUsdtMicros(amount)}. Use the Fedi app to accept this payment.` // TODO: i18n? this only shows to matrix clients, not Fedi users
+
+            dispatch(refreshUsdtBalance({ fedimint, federationId }))
+        } else {
+            log.info('sendMatrixPaymentPush', amount, 'sats')
+
+            const msats = amountUtils.satToMsat(amount as Sats)
+            const result = await fedimint.generateEcash(
+                msats,
+                federationId,
+                includeInvite,
+                frontendMetadata,
+            )
+            ecash = result.ecash
+            senderOperationId = result.operationId
+            messageAmount = msats
+
+            await fedimint.updateTransactionNotes(
+                result.operationId,
+                notes || '',
+                federationId,
+            )
+
+            body = `Sent payment of ${amountUtils.formatSats(amount as Sats)} SATS. Use the Fedi app to accept this payment.` // TODO: i18n? this only shows to matrix clients, not Fedi users
+        }
+
+        const paymentId = uuidv4()
+
+        await client.sendMessage(roomId, {
+            msgtype: 'xyz.fedi.payment',
+            body,
             status: 'pushed',
             paymentId,
             senderOperationId,
             senderId: matrixAuth.userId,
             recipientId,
-            amount: amountMicros,
-            unit: 'usdt',
+            amount: messageAmount,
+            ...(unit === 'usdt' ? { unit } : {}),
             ecash,
             federationId: federation.id,
             // lets non-member recipients join-then-claim
-            ...(shouldShowInviteCode(federation.meta)
-                ? { inviteCode: federation.inviteCode }
-                : {}),
+            ...(includeInvite ? { inviteCode: federation.inviteCode } : {}),
         })
-
-        dispatch(refreshUsdtBalance({ fedimint, federationId }))
 
         return senderOperationId
     },
 )
 
 /**
- * Request a USDT-denominated ecash payment in chat. Mirrors
- * `sendMatrixPaymentRequest` with `amount` in USDT micros and
- * `unit: 'usdt'`.
+ * Request an ecash payment in chat. Defaults to a bitcoin (sats-denominated)
+ * request; when `unit === 'usdt'`, `amount` is interpreted as USDT micros
+ * and the message is stamped with `unit: 'usdt'`.
  */
-export const sendMatrixUsdtPaymentRequest = createAsyncThunk<
+export const sendMatrixPaymentRequest = createAsyncThunk<
     void,
     {
         fedimint: FedimintBridge
         federationId: string
         roomId: MatrixRoom['id']
-        amountMicros: RpcUsdtAmount
+        amount: Sats | RpcUsdtAmount
+        unit?: RpcEcashUnit
     },
     { state: CommonState }
 >(
-    'matrix/sendMatrixUsdtPaymentRequest',
-    async ({ fedimint, federationId, roomId, amountMicros }, { getState }) => {
+    'matrix/sendMatrixDirectPaymentRequestMessage',
+    async (
+        { fedimint, federationId, roomId, amount, unit = 'bitcoin' },
+        { getState },
+    ) => {
         const matrixAuth = selectMatrixAuth(getState())
         if (!matrixAuth) throw new Error('Not authenticated')
 
-        log.info('sendMatrixUsdtPaymentRequest', amountMicros, 'micros')
-
         const client = fedimint.getMatrixClient()
-
         const paymentId = uuidv4()
+
+        let messageAmount: number
+        let body: string
+
+        if (unit === 'usdt') {
+            log.info('sendMatrixPaymentRequest', amount, 'micros')
+
+            messageAmount = amount
+            // Locale-less - see the sibling `sendMatrixPaymentPush` thunk
+            // above for why this mirrors the BTC path's
+            // `amountUtils.formatSats` (also locale-less).
+            body = `Requested payment of ${formatUsdtMicros(amount)}. Use the Fedi app to complete this request.` // TODO: i18n?
+        } else {
+            log.info('sendMatrixPaymentRequest', amount, 'sats')
+
+            messageAmount = amountUtils.satToMsat(amount as Sats)
+            body = `Requested payment of ${amountUtils.formatSats(amount as Sats)} SATS. Use the Fedi app to complete this request.` // TODO: i18n?
+        }
 
         await client.sendMessage(roomId, {
             msgtype: 'xyz.fedi.payment',
-            // Locale-less - see the sibling `sendMatrixUsdtPaymentPush`
-            // thunk above for why this mirrors the BTC path's
-            // `amountUtils.formatSats` (also locale-less).
-            body: `Requested payment of ${formatUsdtMicros(amountMicros)}. Use the Fedi app to complete this request.`, // TODO: i18n?
+            body,
             paymentId,
             status: 'requested',
             recipientId: matrixAuth.userId,
-            amount: amountMicros,
-            unit: 'usdt',
+            amount: messageAmount,
+            ...(unit === 'usdt' ? { unit } : {}),
             federationId,
         })
     },
@@ -2197,9 +2144,10 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
 
             await client.sendMessage(event.roomId, {
                 ...event.content,
-                // Locale-less - see `sendMatrixUsdtPaymentPush` above for
-                // why this mirrors the BTC branch below (`amountUtils.
-                // formatSats`, also locale-less).
+                // Locale-less - see the `unit === 'usdt'` branch of
+                // `sendMatrixPaymentPush` above for why this mirrors the
+                // BTC branch below (`amountUtils.formatSats`, also
+                // locale-less).
                 body: `Sent payment of ${formatUsdtMicros(amount)}.`, // TODO: i18n?
                 status: 'accepted',
                 senderId: matrixAuth.userId,

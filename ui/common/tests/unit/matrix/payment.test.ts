@@ -7,11 +7,19 @@ import {
 } from '../../../hooks/matrix'
 import {
     claimMatrixPayment,
+    sendMatrixPaymentPush,
+    sendMatrixPaymentRequest,
+    setFederations,
     setMatrixAuth,
     setupStore,
     tryReclaimMatrixPayment,
 } from '../../../redux'
-import { MatrixAuth, MatrixPaymentEvent, MatrixRoom } from '../../../types'
+import {
+    LoadedFederation,
+    MatrixAuth,
+    MatrixPaymentEvent,
+    MatrixRoom,
+} from '../../../types'
 import { RpcEcashUnit, RpcTimelineEventItemId } from '../../../types/bindings'
 import { BridgeError } from '../../../utils/errors'
 import {
@@ -20,6 +28,7 @@ import {
     makeMatrixPaymentText,
 } from '../../../utils/matrix'
 import { formatUsdtMicros } from '../../../utils/usdt'
+import { mockFederation1 } from '../../mock-data/federation'
 import {
     createMockPaymentEvent,
     createMockNonPaymentEvent,
@@ -243,6 +252,136 @@ it('handles multiple different payment IDs correctly', () => {
 
     expect(payment1Result.content.status).toBe('received')
     expect(payment2Result.content.status).toBe('requested')
+})
+
+/*
+// Wire-Format Lock: sendMatrixPaymentPush / sendMatrixPaymentRequest
+// (unit: 'usdt')
+// Business Context: the `xyz.fedi.payment` message `content` the USDT
+// branch of these thunks produces is a wire format — old Fedi clients (and
+// the receiving side of this same client, in
+// `claimMatrixPayment`/`getPaymentUnit`) parse these exact fields. This
+// locks the exact shape from BEFORE the (former) standalone
+// `sendMatrixUsdtPaymentPush`/`sendMatrixUsdtPaymentRequest` thunks were
+// merged into their BTC counterparts as a single unit-parameterized pair,
+// so any accidental field rename/drop/reshape during that refactor fails
+// loudly here instead of silently breaking cross-version chat payments.
+*/
+describe('wire-format lock: USDT payment message content', () => {
+    it("sendMatrixPaymentPush(unit: 'usdt') produces the exact message content", async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1sender' } as MatrixAuth),
+        )
+        store.dispatch(
+            setFederations([mockFederation1] as unknown as LoadedFederation[]),
+        )
+
+        const sendMessage = jest.fn().mockResolvedValue(undefined)
+        const usdtGenerateEcash = jest.fn().mockResolvedValue({
+            ecash: 'mock-ecash-token',
+            operationId: 'op-123',
+        })
+        const fedimint = {
+            getMatrixClient: () => ({ sendMessage }),
+            usdtGenerateEcash,
+            usdtBalance: jest.fn().mockResolvedValue(0),
+        } as any
+
+        const roomId = 'room-a' as MatrixRoom['id']
+
+        const senderOperationId = await store
+            .dispatch(
+                sendMatrixPaymentPush({
+                    fedimint,
+                    federationId: mockFederation1.id,
+                    roomId,
+                    recipientId: 'npub1recipient',
+                    amount: 1_500_000,
+                    unit: 'usdt',
+                    notes: 'lunch',
+                }),
+            )
+            .unwrap()
+
+        expect(senderOperationId).toBe('op-123')
+        expect(usdtGenerateEcash).toHaveBeenCalledWith(
+            1_500_000,
+            mockFederation1.id,
+            true, // shouldShowInviteCode(meta: {}) === true
+            {
+                recipientMatrixId: 'npub1recipient',
+                senderMatrixId: 'npub1sender',
+                initialNotes: 'lunch',
+            },
+        )
+
+        expect(sendMessage).toHaveBeenCalledTimes(1)
+        const [calledRoomId, content] = sendMessage.mock.calls[0]
+        expect(calledRoomId).toBe(roomId)
+
+        const { paymentId, ...rest } = content as Record<string, unknown>
+        expect(typeof paymentId).toBe('string')
+        expect((paymentId as string).length).toBeGreaterThan(0)
+
+        expect(rest).toEqual({
+            msgtype: 'xyz.fedi.payment',
+            body: 'Sent payment of 1.50 USDT. Use the Fedi app to accept this payment.',
+            status: 'pushed',
+            senderOperationId: 'op-123',
+            senderId: 'npub1sender',
+            recipientId: 'npub1recipient',
+            amount: 1_500_000,
+            unit: 'usdt',
+            ecash: 'mock-ecash-token',
+            federationId: mockFederation1.id,
+            inviteCode: mockFederation1.inviteCode,
+        })
+    })
+
+    it("sendMatrixPaymentRequest(unit: 'usdt') produces the exact message content", async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1requester' } as MatrixAuth),
+        )
+
+        const sendMessage = jest.fn().mockResolvedValue(undefined)
+        const fedimint = {
+            getMatrixClient: () => ({ sendMessage }),
+        } as any
+
+        const roomId = 'room-a' as MatrixRoom['id']
+
+        await store
+            .dispatch(
+                sendMatrixPaymentRequest({
+                    fedimint,
+                    federationId: mockFederation1.id,
+                    roomId,
+                    amount: 2_000_000,
+                    unit: 'usdt',
+                }),
+            )
+            .unwrap()
+
+        expect(sendMessage).toHaveBeenCalledTimes(1)
+        const [calledRoomId, content] = sendMessage.mock.calls[0]
+        expect(calledRoomId).toBe(roomId)
+
+        const { paymentId, ...rest } = content as Record<string, unknown>
+        expect(typeof paymentId).toBe('string')
+        expect((paymentId as string).length).toBeGreaterThan(0)
+
+        expect(rest).toEqual({
+            msgtype: 'xyz.fedi.payment',
+            body: 'Requested payment of 2.00 USDT. Use the Fedi app to complete this request.',
+            status: 'requested',
+            recipientId: 'npub1requester',
+            amount: 2_000_000,
+            unit: 'usdt',
+            federationId: mockFederation1.id,
+        })
+    })
 })
 
 /*
