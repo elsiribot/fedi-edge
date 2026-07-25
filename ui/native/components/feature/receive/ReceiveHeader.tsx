@@ -1,5 +1,6 @@
 import { useNavigation } from '@react-navigation/native'
 import { Text, Theme, useTheme } from '@rneui/themed'
+import { ParseKeys } from 'i18next'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { StyleSheet } from 'react-native'
@@ -11,7 +12,18 @@ import { NavigationHook } from '../../../types/navigation'
 import Header from '../../ui/Header'
 import { PressableIcon } from '../../ui/PressableIcon'
 
-const UsdtReceiveHeader: React.FC = () => {
+type Props = {
+    /** i18n key for the centered header title */
+    title: ParseKeys
+}
+
+/**
+ * Shared receive-flow header with a Scan shortcut, used by the Bitcoin and
+ * USDT receive screens (their headers were byte-identical except the title).
+ * The Cashu receive header stays separate because it deliberately omits the
+ * Scan action and always shows both back and close buttons.
+ */
+const ReceiveHeader: React.FC<Props> = ({ title }) => {
     const { t } = useTranslation()
     const { theme } = useTheme()
     const navigation = useNavigation<NavigationHook>()
@@ -31,7 +43,7 @@ const UsdtReceiveHeader: React.FC = () => {
             closeRoute="Wallet"
             headerCenter={
                 <Text bold numberOfLines={1} adjustsFontSizeToFit>
-                    {t('feature.usdt.receive-usdt')}
+                    {t(title)}
                 </Text>
             }
             rightContainerStyle={styles(theme).rightContainer}
@@ -55,4 +67,4 @@ const styles = (_theme: Theme) =>
         },
     })
 
-export default UsdtReceiveHeader
+export default ReceiveHeader
