@@ -16,7 +16,8 @@ use futures::StreamExt;
 use rpc_types::error::ErrorCode;
 use rpc_types::{
     EcashReceiveMetadata, EcashReceiveReason, EcashSendMetadata, FrontendMetadata, RpcAmount,
-    RpcGenerateEcashResponse, RpcOperationId, RpcTransactionDirection, RpcTransactionKind,
+    RpcEcashUnit, RpcGenerateEcashResponse, RpcOperationId, RpcTransactionDirection,
+    RpcTransactionKind,
 };
 use tracing::warn;
 
@@ -64,6 +65,8 @@ impl MintOps for MintOpsV1 {
                     internal: false,
                     reason: EcashReceiveReason::Receive,
                     frontend_metadata: Some(frontend_meta),
+                    // mintv1 is the legacy Bitcoin mint.
+                    unit: RpcEcashUnit::Bitcoin,
                 },
             )
             .await
@@ -93,6 +96,7 @@ impl MintOps for MintOpsV1 {
                 internal: false,
                 reason: EcashReceiveReason::Receive,
                 frontend_metadata: None,
+                unit: RpcEcashUnit::Bitcoin,
             });
         let is_fee_exempt =
             receive_meta.internal || receive_meta.reason == EcashReceiveReason::Cancel;
@@ -183,6 +187,7 @@ impl MintOps for MintOpsV1 {
                     EcashSendMetadata {
                         internal: false,
                         frontend_metadata: Some(frontend_meta.clone()),
+                        unit: RpcEcashUnit::Bitcoin,
                     },
                 )
                 .await
@@ -210,6 +215,7 @@ impl MintOps for MintOpsV1 {
                     EcashSendMetadata {
                         internal: true,
                         frontend_metadata: None,
+                        unit: RpcEcashUnit::Bitcoin,
                     },
                 )
                 .await?;
@@ -225,6 +231,7 @@ impl MintOps for MintOpsV1 {
                             internal: true,
                             reason: EcashReceiveReason::Receive,
                             frontend_metadata: None,
+                            unit: RpcEcashUnit::Bitcoin,
                         },
                     )
                     .await?;
@@ -285,6 +292,7 @@ impl MintOps for MintOpsV1 {
                     internal: false,
                     reason: EcashReceiveReason::Cancel,
                     frontend_metadata: None,
+                    unit: RpcEcashUnit::Bitcoin,
                 },
             )
             .await
@@ -401,6 +409,7 @@ impl MintOps for MintOpsV1 {
                     internal: false,
                     reason: EcashReceiveReason::Receive,
                     frontend_metadata: None,
+                    unit: RpcEcashUnit::Bitcoin,
                 });
                 if extra_meta.internal {
                     return Ok(None);
@@ -433,6 +442,7 @@ impl MintOps for MintOpsV1 {
                     .unwrap_or(EcashSendMetadata {
                         internal: false,
                         frontend_metadata: None,
+                        unit: RpcEcashUnit::Bitcoin,
                     });
                 if extra_meta.internal {
                     return Ok(None);

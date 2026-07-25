@@ -11,7 +11,7 @@ use fedimint_mintv2_client::{
 use rpc_types::error::ErrorCode;
 use rpc_types::{
     EcashReceiveMetadata, EcashReceiveReason, EcashSendMetadata, FrontendMetadata, RpcAmount,
-    RpcGenerateEcashResponse, RpcOOBReissueState, RpcOOBSpendState, RpcOperationId,
+    RpcEcashUnit, RpcGenerateEcashResponse, RpcOOBReissueState, RpcOOBSpendState, RpcOperationId,
     RpcTransactionDirection, RpcTransactionKind,
 };
 use tracing::warn;
@@ -66,6 +66,9 @@ impl MintOps for MintOpsV2 {
             internal: false,
             reason: EcashReceiveReason::Receive,
             frontend_metadata: Some(frontend_meta),
+            // Stamp the note's own unit so USDT notes claimed through this
+            // generic receive path are attributed to USDT history.
+            unit: super::super::usdt::rpc_ecash_unit(note_unit),
         })?;
         let operation_id = mintv2.receive(ecash, custom_meta).await?;
         fed.write_pending_receive_fedi_fee_ppms(operation_id, &fee_ppms)
@@ -118,6 +121,8 @@ impl MintOps for MintOpsV2 {
         let custom_meta = serde_json::to_value(EcashSendMetadata {
             internal: false,
             frontend_metadata: Some(frontend_meta),
+            // This path always selects the BITCOIN-unit mint.
+            unit: RpcEcashUnit::Bitcoin,
         })?;
         let (operation_id, mut ecash) = mintv2.send(amount, custom_meta).await?;
         // Stamp the note with its unit so recipients (and validate_ecash) can
@@ -165,6 +170,7 @@ impl MintOps for MintOpsV2 {
             internal: false,
             reason: EcashReceiveReason::Cancel,
             frontend_metadata: None,
+            unit: super::super::usdt::rpc_ecash_unit(note_unit),
         })?;
         let operation_id = mintv2
             .receive(decoded, custom_meta)
@@ -229,6 +235,7 @@ impl MintOps for MintOpsV2 {
                             internal: false,
                             reason: EcashReceiveReason::Receive,
                             frontend_metadata: None,
+                            unit: super::super::usdt::rpc_ecash_unit(note_unit),
                         });
                     let is_fee_exempt =
                         receive_meta.internal || receive_meta.reason == EcashReceiveReason::Cancel;
@@ -289,6 +296,7 @@ impl MintOps for MintOpsV2 {
                     .unwrap_or(EcashSendMetadata {
                         internal: false,
                         frontend_metadata: None,
+                        unit: RpcEcashUnit::Bitcoin,
                     });
                 if extra_meta.internal {
                     return Ok(None);
@@ -316,6 +324,7 @@ impl MintOps for MintOpsV2 {
                         internal: false,
                         reason: EcashReceiveReason::Receive,
                         frontend_metadata: None,
+                        unit: RpcEcashUnit::Bitcoin,
                     });
                 if extra_meta.internal {
                     return Ok(None);

@@ -8,10 +8,12 @@
 //! address. There is no BTC<->USDT exchange functionality here.
 
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
+use fedimint_client::db::ChronologicalOperationLogKey;
 use fedimint_core::base32::{FEDIMINT_PREFIX, decode_prefixed, encode_prefixed};
+use fedimint_core::core::OperationId;
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
 use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::task::sleep;
@@ -34,6 +36,7 @@ use rpc_types::usdt::{
 };
 use rpc_types::{
     EcashReceiveMetadata, EcashReceiveReason, EcashSendMetadata, FrontendMetadata, RpcAmount,
+    RpcEcashUnit,
 };
 use runtime::utils::to_unix_time;
 use tracing::{info, warn};
@@ -307,6 +310,7 @@ impl FederationV2 {
         let custom_meta = serde_json::to_value(EcashSendMetadata {
             internal: false,
             frontend_metadata: Some(frontend_meta),
+            unit: RpcEcashUnit::Usdt,
         })?;
         let (operation_id, mut ecash) = mintv2
             .send(fedimint_core::Amount::from_msats(amount.0), custom_meta)
@@ -337,6 +341,7 @@ impl FederationV2 {
             internal: false,
             reason: EcashReceiveReason::Receive,
             frontend_metadata: None,
+            unit: RpcEcashUnit::Usdt,
         })?;
         let operation_id = mintv2.receive(decoded, custom_meta).await?;
         let final_state = mintv2
@@ -354,76 +359,148 @@ impl FederationV2 {
     /// USDT transaction history from the operation log: on-chain deposits
     /// (usdt module claims) and withdrawals, plus USDT e-cash sends/receives
     /// (USDT-denominated mintv2 operations). Newest first.
-    pub async fn usdt_list_transactions(&self, limit: usize) -> Result<Vec<RpcUsdtTransaction>> {
+    ///
+    /// `start_time` is an exclusive cursor (Unix seconds): when given, only
+    /// entries strictly older than it are returned. It mirrors the
+    /// `listTransactions` cursor convention — callers page by handing back the
+    /// [`RpcUsdtTransaction::created_at`] of the oldest row they last saw.
+    ///
+    /// The operation log is paged in fixed chunks and mapped/filtered to
+    /// USDT-relevant entries as we go, accumulating until we have `limit` of
+    /// them or the log is exhausted. Filtering happens BEFORE the limit is
+    /// applied, so internal mintv2 reissues (and, in a mixed BTC+USDT
+    /// federation, BITCOIN-unit mintv2 operations) can never starve the
+    /// window down to fewer — or zero — user-facing rows.
+    pub async fn usdt_list_transactions(
+        &self,
+        limit: usize,
+        start_time: Option<u64>,
+    ) -> Result<Vec<RpcUsdtTransaction>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
         let include_mintv2 = self.client.mintv2_of_unit(USDT_UNIT).await.is_ok();
 
-        let entries = self
-            .client
-            .operation_log()
-            .paginate_operations_rev(limit, None)
-            .await;
+        // Chunk size for each `paginate_operations_rev` call. Independent of
+        // `limit`: we keep paging in chunks of this size until enough
+        // USDT-relevant entries have accumulated.
+        const PAGE_SIZE: usize = 100;
+
+        // Build the initial exclusive cursor from `start_time`, mirroring
+        // `list_transactions`' `ChronologicalOperationLogKey` convention (the
+        // operation_id component is irrelevant at second granularity).
+        let mut cursor = start_time.map(|secs| ChronologicalOperationLogKey {
+            creation_time: UNIX_EPOCH + Duration::from_secs(secs),
+            operation_id: OperationId::new_random(),
+        });
 
         let mut transactions = Vec::new();
-        for (op_key, entry) in entries {
-            let Ok(created_at) = to_unix_time(op_key.creation_time) else {
-                continue;
-            };
-            let tx = match entry.operation_module_kind() {
-                "usdt" => match entry.try_meta::<UsdtOperationMeta>() {
-                    Ok(UsdtOperationMeta::Claim {
-                        account,
-                        amount,
-                        fee,
-                    }) => Some(RpcUsdtTransaction {
-                        created_at,
-                        // the e-cash actually issued is amount - fee
-                        amount: RpcUsdtAmount(amount.0.saturating_sub(fee.0)),
-                        incoming: true,
-                        kind: RpcUsdtTransactionKind::Deposit {
-                            address: account.to_string(),
-                        },
-                    }),
-                    Ok(UsdtOperationMeta::Withdraw {
-                        recipient,
-                        amount,
-                        txid,
-                        ..
-                    }) => Some(RpcUsdtTransaction {
-                        created_at,
-                        amount: RpcUsdtAmount(amount.0),
-                        incoming: false,
-                        kind: RpcUsdtTransactionKind::Withdrawal {
-                            recipient: recipient.to_string(),
-                            txid: txid.map(|txid| txid.to_string()),
-                        },
-                    }),
-                    Err(_) => None,
-                },
-                "mintv2" if include_mintv2 => {
-                    match entry.try_meta::<MintV2OperationMeta>() {
-                        Ok(MintV2OperationMeta::Send { ecash, .. }) => usdt_ecash_amount(&ecash)
-                            .map(|amount| RpcUsdtTransaction {
-                                created_at,
-                                amount,
-                                incoming: false,
-                                kind: RpcUsdtTransactionKind::EcashSend,
-                            }),
-                        Ok(MintV2OperationMeta::Receive { ecash, .. }) => usdt_ecash_amount(&ecash)
-                            .map(|amount| RpcUsdtTransaction {
-                                created_at,
-                                amount,
-                                incoming: true,
-                                kind: RpcUsdtTransactionKind::EcashReceive,
-                            }),
-                        // reissues are internal bookkeeping, not user payments
-                        Ok(MintV2OperationMeta::Reissue { .. }) | Err(_) => None,
+        loop {
+            let page = self
+                .client
+                .operation_log()
+                .paginate_operations_rev(PAGE_SIZE, cursor)
+                .await;
+            let page_len = page.len();
+            // Cursor for the next page: strictly-older-than the oldest entry
+            // we just saw (the page is newest-first).
+            let next_cursor = page.last().map(|(key, _)| *key);
+
+            for (op_key, entry) in page {
+                let Ok(created_at) = to_unix_time(op_key.creation_time) else {
+                    continue;
+                };
+                let tx = match entry.operation_module_kind() {
+                    "usdt" => match entry.try_meta::<UsdtOperationMeta>() {
+                        Ok(UsdtOperationMeta::Claim {
+                            account,
+                            amount,
+                            fee,
+                        }) => Some(RpcUsdtTransaction {
+                            created_at,
+                            // the e-cash actually issued is amount - fee
+                            amount: RpcUsdtAmount(amount.0.saturating_sub(fee.0)),
+                            incoming: true,
+                            kind: RpcUsdtTransactionKind::Deposit {
+                                address: account.to_string(),
+                            },
+                        }),
+                        Ok(UsdtOperationMeta::Withdraw {
+                            recipient,
+                            amount,
+                            txid,
+                            ..
+                        }) => Some(RpcUsdtTransaction {
+                            created_at,
+                            amount: RpcUsdtAmount(amount.0),
+                            incoming: false,
+                            kind: RpcUsdtTransactionKind::Withdrawal {
+                                recipient: recipient.to_string(),
+                                txid: txid.map(|txid| txid.to_string()),
+                            },
+                        }),
+                        // The usdt module kind is unique to the USDT-denominated
+                        // instance, so Claim/Withdraw are never ambiguous in a
+                        // mixed federation — no unit filter needed here.
+                        Err(_) => None,
+                    },
+                    "mintv2" if include_mintv2 => {
+                        match entry.try_meta::<MintV2OperationMeta>() {
+                            // Only USDT-unit mintv2 sends/receives belong in USDT
+                            // history. In a mixed BTC+USDT federation a BITCOIN
+                            // mintv2 send/receive would otherwise have its msats
+                            // misread as USDT micros (a 1000-sat note rendering as
+                            // 1 USDT). We stamp the unit into our own custom_meta
+                            // at write time (usdt.rs and mint_ops/v2.rs) and filter
+                            // on it here. Entries whose custom_meta predates the
+                            // stamp deserialize to `Bitcoin` (serde default) and are
+                            // excluded — safe, because mixed federations only became
+                            // possible on this branch, so no pre-stamp local op can
+                            // be a USDT one.
+                            Ok(MintV2OperationMeta::Send { ecash, custom_meta }) => {
+                                serde_json::from_value::<EcashSendMetadata>(custom_meta)
+                                    .ok()
+                                    .filter(|meta| meta.unit == RpcEcashUnit::Usdt)
+                                    .and_then(|_| usdt_ecash_amount(&ecash))
+                                    .map(|amount| RpcUsdtTransaction {
+                                        created_at,
+                                        amount,
+                                        incoming: false,
+                                        kind: RpcUsdtTransactionKind::EcashSend,
+                                    })
+                            }
+                            Ok(MintV2OperationMeta::Receive {
+                                ecash, custom_meta, ..
+                            }) => serde_json::from_value::<EcashReceiveMetadata>(custom_meta)
+                                .ok()
+                                .filter(|meta| meta.unit == RpcEcashUnit::Usdt)
+                                .and_then(|_| usdt_ecash_amount(&ecash))
+                                .map(|amount| RpcUsdtTransaction {
+                                    created_at,
+                                    amount,
+                                    incoming: true,
+                                    kind: RpcUsdtTransactionKind::EcashReceive,
+                                }),
+                            // reissues are internal bookkeeping, not user payments
+                            Ok(MintV2OperationMeta::Reissue { .. }) | Err(_) => None,
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(tx) = tx {
+                    transactions.push(tx);
+                    if transactions.len() >= limit {
+                        return Ok(transactions);
                     }
                 }
-                _ => None,
-            };
-            if let Some(tx) = tx {
-                transactions.push(tx);
             }
+
+            // A short page means the log is exhausted; stop before an
+            // empty-page round-trip.
+            if page_len < PAGE_SIZE {
+                break;
+            }
+            cursor = next_cursor;
         }
         Ok(transactions)
     }

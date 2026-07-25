@@ -1200,8 +1200,13 @@ async fn usdtReceiveEcash(
 async fn usdtListTransactions(
     federation: Arc<FederationV2>,
     limit: u32,
+    // Exclusive cursor in Unix seconds (a prior transaction's `createdAt`);
+    // returns entries strictly older than it. Mirrors `listTransactions`.
+    start_time: Option<u32>,
 ) -> anyhow::Result<Vec<RpcUsdtTransaction>> {
-    federation.usdt_list_transactions(limit as usize).await
+    federation
+        .usdt_list_transactions(limit as usize, start_time.map(u64::from))
+        .await
 }
 
 #[macro_rules_derive(federation_rpc_method!)]

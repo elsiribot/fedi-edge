@@ -2873,6 +2873,7 @@ export type usdtListDeposits = { federationId: RpcFederationId };
 export type usdtListTransactions = {
   federationId: RpcFederationId;
   limit: number;
+  startTime: number | null;
 };
 
 export type usdtReceiveEcash = { federationId: RpcFederationId; ecash: string };

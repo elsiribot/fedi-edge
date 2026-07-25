@@ -1008,12 +1008,23 @@ pub struct EcashReceiveMetadata {
     #[serde(default)]
     pub reason: EcashReceiveReason,
     pub frontend_metadata: Option<FrontendMetadata>,
+    /// Denomination of the received notes. Stamped at write time so history
+    /// (e.g. `usdt_list_transactions`) can tell USDT-unit mintv2 operations
+    /// apart from BITCOIN-unit ones in a mixed federation. Entries written
+    /// before this field default to `Bitcoin`, which is safe: mixed BTC+USDT
+    /// federations only became possible on the branch that introduced the
+    /// stamp, so no pre-stamp local operation can be a USDT one.
+    #[serde(default)]
+    pub unit: RpcEcashUnit,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EcashSendMetadata {
     pub internal: bool,
     pub frontend_metadata: Option<FrontendMetadata>,
+    /// Denomination of the sent notes. See [`EcashReceiveMetadata::unit`].
+    #[serde(default)]
+    pub unit: RpcEcashUnit,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

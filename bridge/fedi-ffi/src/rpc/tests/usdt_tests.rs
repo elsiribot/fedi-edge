@@ -39,7 +39,8 @@ use fedimint_core::envs::{
 };
 use fedimint_logging::TracingSetup;
 use fedimint_usdt_common::{EvmAddress, USDT_UNIT, UsdtAmount};
-use rpc_types::usdt::{RpcUsdtAmount, RpcUsdtWithdrawalStatus};
+use rpc_types::FrontendMetadata;
+use rpc_types::usdt::{RpcUsdtAmount, RpcUsdtTransactionKind, RpcUsdtWithdrawalStatus};
 use tracing::info;
 
 use crate::rpc;
@@ -299,6 +300,52 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
     info!(
         ?last_status,
         "withdrawal tracked in the federation pipeline"
+    );
+
+    // --- USDT e-cash history: filter-before-limit + paging (Task 6) ---
+    // Each USDT e-cash send also spawns an internal mintv2 Reissue (change)
+    // operation, so the newest operation-log entries are dominated by
+    // reissues. With a naive "take the newest N ops, then filter" approach a
+    // `limit=2` window could be entirely reissues and surface zero (or fewer
+    // than 2) user-facing rows. `usdt_list_transactions` must instead page the
+    // log until it has accumulated 2 non-reissue (EcashSend) entries.
+    info!("performing three USDT e-cash sends to exercise history filtering");
+    let balance_before_sends = federation.usdt_balance().await?.0;
+    let ecash_send_amount = RpcUsdtAmount(balance_before_sends / 16);
+    ensure!(
+        ecash_send_amount.0 > 0 && balance_before_sends >= ecash_send_amount.0 * 4,
+        "need USDT balance to cover three e-cash sends (have {balance_before_sends})"
+    );
+    for i in 0..3 {
+        let sent = federation
+            .usdt_generate_ecash(ecash_send_amount, false, FrontendMetadata::default())
+            .await
+            .with_context(|| format!("usdt e-cash send #{i} failed"))?;
+        ensure!(!sent.ecash.is_empty(), "send #{i} produced empty ecash");
+    }
+
+    let recent = federation.usdt_list_transactions(2, None).await?;
+    ensure!(
+        recent.len() == 2,
+        "usdt_list_transactions(limit=2) must return exactly 2 rows even though \
+         internal reissues dominate the newest operations (got {})",
+        recent.len()
+    );
+    ensure!(
+        recent
+            .iter()
+            .all(|tx| matches!(tx.kind, RpcUsdtTransactionKind::EcashSend)),
+        "the two newest USDT history rows must be the e-cash sends, not internal reissues"
+    );
+
+    // Cursor paging: passing the oldest returned row's `createdAt` as
+    // `start_time` must return only strictly-older-or-equal entries — it must
+    // never re-surface an entry newer than the cursor.
+    let cursor = recent.last().map(|tx| tx.created_at);
+    let older = federation.usdt_list_transactions(10, cursor).await?;
+    ensure!(
+        older.iter().all(|tx| tx.created_at <= cursor.unwrap()),
+        "paged rows must be no newer than the supplied cursor"
     );
 
     info!("usdt bridge e2e complete");

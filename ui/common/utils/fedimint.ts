@@ -409,8 +409,16 @@ export class FedimintBridge {
         return this.rpcTyped('usdtReceiveEcash', { federationId, ecash })
     }
 
-    async usdtListTransactions(federationId: string, limit: number) {
-        return this.rpcTyped('usdtListTransactions', { federationId, limit })
+    async usdtListTransactions(
+        federationId: string,
+        limit: number,
+        startTime?: number,
+    ) {
+        return this.rpcTyped('usdtListTransactions', {
+            federationId,
+            limit,
+            startTime: startTime ?? null,
+        })
     }
 
     async listTransactions(
