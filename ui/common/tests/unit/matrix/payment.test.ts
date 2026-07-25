@@ -698,10 +698,13 @@ describe('tryReclaimMatrixPayment USDT reclaim guard', () => {
             setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
         )
 
+        // Current bridge: the rejection is tagged with
+        // `ErrorCode::EcashAlreadySpent`, matched via `errorCode` (mirroring
+        // the BTC path in wallet.ts), not by an exact error string.
         const alreadySpentError = new BridgeError({
-            error: 'e-cash was rejected (possibly already spent)',
-            detail: 'e-cash was rejected (possibly already spent)',
-            errorCode: null,
+            error: 'Ecash notes are already spent',
+            detail: 'Ecash notes are already spent',
+            errorCode: 'ecashAlreadySpent',
         })
 
         const usdtReceiveEcash = jest.fn().mockRejectedValue(alreadySpentError)
@@ -746,6 +749,42 @@ describe('tryReclaimMatrixPayment USDT reclaim guard', () => {
         await attemptReclaim() // guarded — must NOT call usdtReceiveEcash again
 
         expect(usdtReceiveEcash).toHaveBeenCalledTimes(2)
+    })
+
+    it('still absorbs the legacy plain-string rejection from an OLD (pre-tag) bridge', async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+        )
+
+        // Old bridge: no `errorCode` tag, only the plain-string bail! — the
+        // fallback branch of the guard must still absorb it.
+        const legacyAlreadySpentError = new BridgeError({
+            error: 'e-cash was rejected (possibly already spent)',
+            detail: 'e-cash was rejected (possibly already spent)',
+            errorCode: null,
+        })
+
+        const usdtReceiveEcash = jest
+            .fn()
+            .mockRejectedValue(legacyAlreadySpentError)
+        const fedimint = {
+            usdtReceiveEcash,
+            usdtBalance: jest.fn().mockResolvedValue(0),
+        } as any
+
+        await expect(
+            store
+                .dispatch(
+                    tryReclaimMatrixPayment({
+                        fedimint,
+                        event: buildRejectedUsdtEvent(),
+                    }),
+                )
+                .unwrap(),
+        ).resolves.toBeUndefined()
+
+        expect(usdtReceiveEcash).toHaveBeenCalledTimes(1)
     })
 
     it('rethrows a non-already-spent (transport) error so the payment remains eligible for retry', async () => {

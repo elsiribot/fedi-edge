@@ -345,7 +345,12 @@ impl FederationV2 {
         match final_state {
             MintV2FinalReceiveOperationState::Success => Ok(RpcUsdtAmount(amount.msats)),
             MintV2FinalReceiveOperationState::Rejected => {
-                bail!("e-cash was rejected (possibly already spent)")
+                // Tag with `ErrorCode::EcashAlreadySpent` (mirroring the
+                // mintv1 receive path in mint_ops/v1.rs) so JS can match on
+                // the serialized `errorCode` ("ecashAlreadySpent") instead of
+                // an exact error string. `mintv2.receive` rejects an
+                // already-spent note here.
+                bail!(ErrorCode::EcashAlreadySpent)
             }
         }
     }

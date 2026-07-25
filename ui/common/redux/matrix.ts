@@ -1832,6 +1832,19 @@ export const claimMatrixPayment = createAsyncThunk<
     },
 )
 
+/**
+ * True when a `usdtReceiveEcash` failure means the notes were already redeemed
+ * (reclaimed in a prior session / already spent), so the caller can absorb it
+ * as success. Matches the tagged `errorCode` a current bridge attaches
+ * (`ErrorCode::EcashAlreadySpent` → `'ecashAlreadySpent'`, mirroring the BTC
+ * path in `wallet.ts`) and, as a fallback, the plain-string bail! an OLD
+ * (pre-tag) bridge produced.
+ */
+const isEcashAlreadySpentError = (err: unknown): boolean =>
+    err instanceof BridgeError &&
+    (err.errorCode === 'ecashAlreadySpent' ||
+        err.error === 'e-cash was rejected (possibly already spent)')
+
 export const tryReclaimMatrixPayment = createAsyncThunk<
     void,
     { fedimint: FedimintBridge; event: MatrixPaymentEvent },
@@ -1881,23 +1894,19 @@ export const tryReclaimMatrixPayment = createAsyncThunk<
                 // record it), the bridge's `mintv2.receive` rejects the
                 // already-spent note and `usdt_receive_ecash` (see
                 // crates/federations/src/federation_v2/usdt.rs, the
-                // `MintV2FinalReceiveOperationState::Rejected` arm) bails
-                // with the plain string "e-cash was rejected (possibly
-                // already spent)". Unlike the legacy mintv1 receive path
-                // (rpc-types `ErrorCode::EcashAlreadySpent`, matched via
-                // `errorCode` in `wallet.ts`'s `receiveEcash` thunk), this
-                // bail! isn't tagged with an `ErrorCode`, so it only
-                // surfaces to JS as `BridgeError.error` text — match on
-                // that exact string. Treating it as success (not
-                // rethrowing) keeps this paymentId marked handled in
-                // `checkForReceivablePayments`, so the debounced timeline
-                // listener stops re-attempting it. Any other error (e.g.
-                // a genuine transport failure) is rethrown so the payment
-                // stays eligible for retry.
-                if (
-                    err instanceof BridgeError &&
-                    err.error === 'e-cash was rejected (possibly already spent)'
-                ) {
+                // `MintV2FinalReceiveOperationState::Rejected` arm) bails with
+                // `ErrorCode::EcashAlreadySpent`, mirroring the legacy mintv1
+                // receive path. That surfaces to JS as
+                // `errorCode === 'ecashAlreadySpent'` (same match `wallet.ts`'s
+                // `receiveEcash` thunk uses for the BTC path). We keep matching
+                // the old plain-string bail! as a fallback so notes reclaimed
+                // against an OLD bridge (which tagged no `errorCode`) are still
+                // absorbed. Treating it as success (not rethrowing) keeps this
+                // paymentId marked handled in `checkForReceivablePayments`, so
+                // the debounced timeline listener stops re-attempting it. Any
+                // other error (e.g. a genuine transport failure) is rethrown so
+                // the payment stays eligible for retry.
+                if (isEcashAlreadySpentError(err)) {
                     log.info(
                         'USDT payment already reclaimed in a previous session, treating as success:',
                         event.content.senderOperationId,
@@ -2060,11 +2069,23 @@ export const cancelMatrixPayment = createAsyncThunk<
     if (event.content.ecash && event.content.federationId) {
         const paymentUnit = getPaymentUnit(event.content)
         if (paymentUnit === 'usdt') {
-            // USDT notes are reclaimed by redeeming them back ourselves
-            await fedimint.usdtReceiveEcash(
-                event.content.ecash,
-                event.content.federationId,
-            )
+            // USDT notes are reclaimed by redeeming them back ourselves. If
+            // the note was already reclaimed (e.g. a prior cancel/reclaim in
+            // another session), absorb the already-spent rejection — the goal
+            // is just to get the notes back and mark the message canceled, and
+            // they already are back.
+            try {
+                await fedimint.usdtReceiveEcash(
+                    event.content.ecash,
+                    event.content.federationId,
+                )
+            } catch (err) {
+                if (!isEcashAlreadySpentError(err)) throw err
+                log.info(
+                    'USDT payment already reclaimed, treating cancel as success:',
+                    event.content.paymentId,
+                )
+            }
             dispatch(
                 refreshUsdtBalance({
                     fedimint,
