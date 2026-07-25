@@ -1722,8 +1722,8 @@ export const sendMatrixUsdtPaymentPush = createAsyncThunk<
         } satisfies FrontendMetadata
 
         const { ecash, operationId } = await fedimint.usdtGenerateEcash(
-            federationId,
             amountMicros,
+            federationId,
             shouldShowInviteCode(federation.meta),
             frontendMetadata,
         )
@@ -1814,7 +1814,7 @@ export const claimMatrixPayment = createAsyncThunk<
         if (event.content.unit === 'usdt') {
             // USDT-denominated ecash is redeemed via the USDT module and
             // has no receiver operation ID
-            await fedimint.usdtReceiveEcash(federationId, ecash)
+            await fedimint.usdtReceiveEcash(ecash, federationId)
             dispatch(refreshUsdtBalance({ fedimint, federationId }))
         } else {
             const frontendMetadata = {
@@ -1867,8 +1867,8 @@ export const tryReclaimMatrixPayment = createAsyncThunk<
             )
             // USDT notes are reclaimed by redeeming them back ourselves
             await fedimint.usdtReceiveEcash(
-                event.content.federationId,
                 event.content.ecash,
+                event.content.federationId,
             )
             dispatch(
                 refreshUsdtBalance({
@@ -2025,8 +2025,8 @@ export const cancelMatrixPayment = createAsyncThunk<
         if (event.content.unit === 'usdt') {
             // USDT notes are reclaimed by redeeming them back ourselves
             await fedimint.usdtReceiveEcash(
-                event.content.federationId,
                 event.content.ecash,
+                event.content.federationId,
             )
             dispatch(
                 refreshUsdtBalance({
@@ -2083,8 +2083,8 @@ export const acceptMatrixPaymentRequest = createAsyncThunk<
         if (event.content.unit === 'usdt') {
             const { ecash, operationId: senderOperationId } =
                 await fedimint.usdtGenerateEcash(
-                    federationId,
                     amount,
+                    federationId,
                     federation?.meta
                         ? shouldShowInviteCode(federation.meta)
                         : false,

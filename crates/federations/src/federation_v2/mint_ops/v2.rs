@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, anyhow, bail};
 use bug_report::reused_ecash_proofs::SerializedReusedEcashProofs;
 use fedimint_client::module::oplog::OperationLogEntry;
-use fedimint_core::base32::{FEDIMINT_PREFIX, decode_prefixed, encode_prefixed};
+use fedimint_core::base32::{FEDIMINT_PREFIX, decode_prefixed};
 use fedimint_core::core::OperationId;
 use fedimint_core::{Amount, apply, async_trait_maybe_send};
 use fedimint_mintv2_client::{
@@ -124,17 +124,15 @@ impl MintOps for MintOpsV2 {
             // This path always selects the BITCOIN-unit mint.
             unit: RpcEcashUnit::Bitcoin,
         })?;
-        let (operation_id, mut ecash) = mintv2.send(amount, custom_meta).await?;
-        // Stamp the note with its unit so recipients (and validate_ecash) can
-        // classify it without a joined-federation instance lookup.
-        ecash = ecash.with_unit(fedimint_core::module::AmountUnit::BITCOIN);
+        let (operation_id, ecash) = mintv2.send(amount, custom_meta).await?;
         let sent_amount = ecash.amount();
-        // Embed a federation invite so non-member recipients can
-        // join-then-claim (skipped gracefully by older clients).
-        if include_invite && let Ok(invite) = fed.get_invite_code().await.parse() {
-            ecash = ecash.with_invite(invite);
-        }
-        let ecash = encode_prefixed(FEDIMINT_PREFIX, &ecash);
+        let ecash = fed
+            .stamp_and_encode_generated_ecash(
+                ecash,
+                fedimint_core::module::AmountUnit::BITCOIN,
+                include_invite,
+            )
+            .await;
         let settled_fees_by_stream = fed
             .get_fee_amounts_by_stream(
                 fedimint_mint_client::KIND,

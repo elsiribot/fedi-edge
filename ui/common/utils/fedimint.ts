@@ -388,8 +388,8 @@ export class FedimintBridge {
     }
 
     async usdtGenerateEcash(
-        federationId: string,
         amount: RpcUsdtAmount,
+        federationId: string,
         includeInvite = false,
         frontendMetadata: FrontendMetadata = {
             initialNotes: null,
@@ -405,7 +405,7 @@ export class FedimintBridge {
         })
     }
 
-    async usdtReceiveEcash(federationId: string, ecash: string) {
+    async usdtReceiveEcash(ecash: string, federationId: string) {
         return this.rpcTyped('usdtReceiveEcash', { federationId, ecash })
     }
 

@@ -70,7 +70,7 @@ const UsdtSendOfflineQr: React.FC<Props> = ({ navigation, route }: Props) => {
         setIsCancelling(true)
         try {
             // Reclaim our own notes to cancel the send
-            await fedimint.usdtReceiveEcash(federationId, ecash)
+            await fedimint.usdtReceiveEcash(ecash, federationId)
             dispatch(refreshUsdtBalance({ fedimint, federationId }))
 
             toast.show({

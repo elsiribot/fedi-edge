@@ -12,7 +12,7 @@ use std::time::{Duration, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use fedimint_client::db::ChronologicalOperationLogKey;
-use fedimint_core::base32::{FEDIMINT_PREFIX, decode_prefixed, encode_prefixed};
+use fedimint_core::base32::{FEDIMINT_PREFIX, decode_prefixed};
 use fedimint_core::core::OperationId;
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
 use fedimint_core::secp256k1::PublicKey;
@@ -312,19 +312,13 @@ impl FederationV2 {
             frontend_metadata: Some(frontend_meta),
             unit: RpcEcashUnit::Usdt,
         })?;
-        let (operation_id, mut ecash) = mintv2
+        let (operation_id, ecash) = mintv2
             .send(fedimint_core::Amount::from_msats(amount.0), custom_meta)
             .await?;
-        // Stamp the note with its unit so recipients (and validate_ecash) can
-        // classify it as USDT without a joined-federation instance lookup.
-        ecash = ecash.with_unit(USDT_UNIT);
         drop(spend_guard);
-        // Embed a federation invite so non-member recipients can
-        // join-then-claim (skipped gracefully by older clients).
-        if include_invite && let Ok(invite) = self.get_invite_code().await.parse() {
-            ecash = ecash.with_invite(invite);
-        }
-        let ecash = encode_prefixed(FEDIMINT_PREFIX, &ecash);
+        let ecash = self
+            .stamp_and_encode_generated_ecash(ecash, USDT_UNIT, include_invite)
+            .await;
         Ok(RpcUsdtGenerateEcashResponse {
             ecash,
             operation_id: rpc_types::RpcOperationId(operation_id),

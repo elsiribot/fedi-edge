@@ -59,8 +59,8 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
         setIsGenerating(true)
         try {
             const { ecash } = await fedimint.usdtGenerateEcash(
-                federationId,
                 amountMicros,
+                federationId,
                 // embed an invite so non-members can join-then-claim,
                 // unless the federation opted out
                 federation?.meta ? shouldShowInviteCode(federation.meta) : false,

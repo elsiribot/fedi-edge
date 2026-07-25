@@ -44,6 +44,7 @@ use fedimint_client::secret::RootSecretStrategy;
 use fedimint_client::{Client, ClientBuilder, ClientHandle};
 use fedimint_connectors::ConnectorRegistry;
 use fedimint_connectors::error::ServerError;
+use fedimint_core::base32::{FEDIMINT_PREFIX, encode_prefixed};
 use fedimint_core::config::{ClientConfig, FederationId};
 use fedimint_core::core::{ModuleKind, OperationId};
 use fedimint_core::db::{
@@ -74,6 +75,7 @@ use fedimint_meta_client::MetaModuleMetaSourceWithFallback;
 use fedimint_mint_client::api::MintFederationApi;
 use fedimint_mint_client::config::MintClientConfig;
 use fedimint_mint_client::{MintClientInit, MintClientModule};
+use fedimint_mintv2_client::ECash as MintV2ECash;
 use fedimint_usdt_common::EvmAddress;
 use fedimint_wallet_client::{DepositStateV2, PegOutFees, WalletClientInit};
 use fedimint_walletv2_client::WalletClientModule as WalletV2ClientModule;
@@ -2963,6 +2965,27 @@ impl FederationV2 {
             .get_value(&InviteCodeKey)
             .await
             .expect("invite code must exist")
+    }
+
+    /// Stamps freshly-sent e-cash with its [`AmountUnit`] and, optionally, an
+    /// embedded federation invite, then encodes it for transport. Shared by
+    /// the BTC (`MintOpsV2::generate_ecash`) and USDT (`usdt_generate_ecash`)
+    /// generate-ecash paths so the two stay in sync.
+    pub(crate) async fn stamp_and_encode_generated_ecash(
+        &self,
+        ecash: MintV2ECash,
+        unit: AmountUnit,
+        include_invite: bool,
+    ) -> String {
+        // Stamp the note with its unit so recipients (and validate_ecash) can
+        // classify it without a joined-federation instance lookup.
+        let mut ecash = ecash.with_unit(unit);
+        // Embed a federation invite so non-member recipients can
+        // join-then-claim (skipped gracefully by older clients).
+        if include_invite && let Ok(invite) = self.get_invite_code().await.parse() {
+            ecash = ecash.with_invite(invite);
+        }
+        encode_prefixed(FEDIMINT_PREFIX, &ecash)
     }
 
     pub(crate) async fn update_operation_state<T>(&self, operation_id: OperationId, state: T)
