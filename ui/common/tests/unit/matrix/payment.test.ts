@@ -1,7 +1,10 @@
 import { waitFor } from '@testing-library/react'
 import { TFunction } from 'i18next'
 
-import { useMatrixPaymentTransaction } from '../../../hooks/matrix'
+import {
+    useMatrixPaymentEvent,
+    useMatrixPaymentTransaction,
+} from '../../../hooks/matrix'
 import {
     claimMatrixPayment,
     setMatrixAuth,
@@ -9,7 +12,7 @@ import {
     tryReclaimMatrixPayment,
 } from '../../../redux'
 import { MatrixAuth, MatrixPaymentEvent, MatrixRoom } from '../../../types'
-import { RpcTimelineEventItemId } from '../../../types/bindings'
+import { RpcEcashUnit, RpcTimelineEventItemId } from '../../../types/bindings'
 import { BridgeError } from '../../../utils/errors'
 import {
     consolidatePaymentEvents,
@@ -893,6 +896,170 @@ describe('undefined/bitcoin unit regression (unaffected by this change)', () => 
         expect(sendMessage).toHaveBeenCalledWith(
             roomId,
             expect.objectContaining({ status: 'received' }),
+        )
+    })
+})
+
+/*
+// useMatrixPaymentEvent Button Derivation Tests
+// Business Context: `useMatrixPaymentEvent` is the hook backing the chat
+// payment bubble's action buttons. Two spots hide the accept/pay button for
+// a payment denominated in an ecash unit this app version doesn't
+// understand (`getPaymentUnit(...) === 'unsupported'`): the incoming-push
+// "accept via foreign ecash" flow, and the incoming-request "pay" flow. Both
+// must fall through to their normal (reject-only or empty) button set
+// instead of offering an action the app can't fulfill, while 'usdt' and
+// legacy (`unit: undefined`) payments must be completely unaffected.
+*/
+
+const noopT = jest.fn((key: string) => key) as unknown as TFunction
+
+describe('useMatrixPaymentEvent unsupported-unit button hiding', () => {
+    // covers ui/common/hooks/matrix.ts ~771-775: the incoming-push branch
+    // taken when the recipient hasn't joined the paying federation
+    // (`!canClaimPayment`), which otherwise offers reject + "accept via
+    // foreign ecash" buttons
+    describe('incoming push, not-yet-joined federation (foreign-ecash accept flow)', () => {
+        const buildPushEvent = (unit: RpcEcashUnit | undefined) =>
+            createMockPaymentEvent({
+                content: {
+                    unit,
+                    status: 'pushed',
+                    amount: 1000,
+                    senderId: 'npub1sender',
+                    recipientId: 'npub1recipient',
+                    federationId: 'fed-not-joined',
+                },
+            })
+
+        it('excludes the accept (and reject) buttons for an unsupported unit', async () => {
+            const store = setupStore()
+            store.dispatch(
+                setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+            )
+            const mockFedimint = createMockFedimintBridge()
+
+            const { result } = renderHookWithState(
+                () =>
+                    useMatrixPaymentEvent({
+                        event: buildPushEvent('other'),
+                        t: noopT,
+                        onError: jest.fn(),
+                    }),
+                store,
+                mockFedimint,
+            )
+
+            await waitFor(() => {
+                expect(result.current.isLoadingTransaction).toBe(false)
+            })
+
+            expect(result.current.buttons).toEqual([])
+        })
+
+        it.each<RpcEcashUnit | undefined>(['usdt', undefined])(
+            'regression: keeps the accept button for unit=%s',
+            async unit => {
+                const store = setupStore()
+                store.dispatch(
+                    setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+                )
+                const mockFedimint = createMockFedimintBridge()
+
+                const { result } = renderHookWithState(
+                    () =>
+                        useMatrixPaymentEvent({
+                            event: buildPushEvent(unit),
+                            t: noopT,
+                            onError: jest.fn(),
+                        }),
+                    store,
+                    mockFedimint,
+                )
+
+                await waitFor(() => {
+                    expect(result.current.isLoadingTransaction).toBe(false)
+                })
+
+                expect(result.current.buttons.map(b => b.label)).toEqual([
+                    'words.reject',
+                    'words.accept',
+                ])
+            },
+        )
+    })
+
+    // covers ui/common/hooks/matrix.ts ~845-855: the incoming-request
+    // branch, which otherwise offers a "pay" button (and a "reject" button
+    // in DMs)
+    describe('incoming request (pay flow)', () => {
+        const buildRequestEvent = (unit: RpcEcashUnit | undefined) =>
+            createMockPaymentEvent({
+                content: {
+                    unit,
+                    status: 'requested',
+                    amount: 1000,
+                    senderId: 'npub1requester',
+                    recipientId: 'npub1requester',
+                    federationId: 'fed-not-joined',
+                },
+            })
+
+        it('excludes the pay button for an unsupported unit', async () => {
+            const store = setupStore()
+            store.dispatch(
+                setMatrixAuth({ userId: 'npub1me' } as MatrixAuth),
+            )
+            const mockFedimint = createMockFedimintBridge()
+
+            const { result } = renderHookWithState(
+                () =>
+                    useMatrixPaymentEvent({
+                        event: buildRequestEvent('other'),
+                        t: noopT,
+                        onError: jest.fn(),
+                    }),
+                store,
+                mockFedimint,
+            )
+
+            await waitFor(() => {
+                expect(result.current.isLoadingTransaction).toBe(false)
+            })
+
+            // not a DM (no room loaded), so no reject button either — the
+            // unsupported unit leaves nothing to offer
+            expect(result.current.buttons).toEqual([])
+        })
+
+        it.each<RpcEcashUnit | undefined>(['usdt', undefined])(
+            'regression: keeps the pay button for unit=%s',
+            async unit => {
+                const store = setupStore()
+                store.dispatch(
+                    setMatrixAuth({ userId: 'npub1me' } as MatrixAuth),
+                )
+                const mockFedimint = createMockFedimintBridge()
+
+                const { result } = renderHookWithState(
+                    () =>
+                        useMatrixPaymentEvent({
+                            event: buildRequestEvent(unit),
+                            t: noopT,
+                            onError: jest.fn(),
+                        }),
+                    store,
+                    mockFedimint,
+                )
+
+                await waitFor(() => {
+                    expect(result.current.isLoadingTransaction).toBe(false)
+                })
+
+                expect(result.current.buttons.map(b => b.label)).toEqual([
+                    'words.pay',
+                ])
+            },
         )
     })
 })
