@@ -1546,6 +1546,7 @@
             "send-usdt": "Send USDT",
             "awaiting-deposit": "Awaiting deposit…",
             "deposit-received": "Deposit received",
+            "deposit-received-notification": "USDT deposit received: {{amount}}",
             "recipient-address": "Recipient address (0x…)",
             "invalid-address": "Invalid address",
             "invalid-amount": "Invalid amount",

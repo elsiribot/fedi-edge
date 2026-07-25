@@ -21,12 +21,14 @@ import {
     selectFederations,
     configureMatrixPushNotifications,
 } from '@fedi/common/redux'
-import amountUtils from '@fedi/common/utils/AmountUtils'
+import { UsdtDepositEvent } from '@fedi/common/types/bindings'
 import { TaggedError } from '@fedi/common/utils/errors'
 import { FedimintBridge } from '@fedi/common/utils/fedimint'
 import { makeLog } from '@fedi/common/utils/log'
 import { encodeFediMatrixRoomUri } from '@fedi/common/utils/matrix'
+import { formatNotificationAmount } from '@fedi/common/utils/notifications'
 import { getTxnDirection } from '@fedi/common/utils/transaction'
+import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import { store, AppDispatch } from '../state/store'
 import {
@@ -146,48 +148,26 @@ export const handleBackgroundFCMReceived = async (
     await displayMessageReceivedNotification(message.data, t)
 }
 
-/** Displays Payment Notifications */
-export const displayPaymentReceivedNotification = async (
-    event: TransactionEvent,
+/**
+ * Dispatches a local "payment received" notification with the given
+ * body text, prefixed with the federation's name (if resolvable). Shared
+ * by both the generic `transaction`-event path and the USDT
+ * `usdtDeposit`-event path below, since both are "money showed up in the
+ * background" notifications that should look/behave identically aside
+ * from how their body text is derived.
+ */
+const dispatchPaymentReceivedNotification = async (
+    federationId: string,
+    body: string,
     t: TFunction,
 ): Promise<void> => {
-    let transaction: TransactionListEntry | undefined
-
-    if (typeof event.transaction === 'object' && event.transaction !== null) {
-        transaction = event.transaction as TransactionListEntry
-    }
-
-    if (!transaction) return
-
-    const direction = getTxnDirection(transaction)
-
-    // Skip outbound payments
-    if (direction !== TransactionDirection.receive) return
-
-    // Skip on-chain transactions until claimed
-    if (
-        transaction.kind === 'onchainDeposit' &&
-        transaction.state?.type !== 'claimed'
-    )
-        return
-
-    // Skip ecash transactions until done
-    if (transaction.kind === 'oobReceive' && transaction.state?.type !== 'done')
-        return
-
     const federations = selectFederations(store.getState())
-    const federation = federations.find(f => f.id === event.federationId)
+    const federation = federations.find(f => f.id === federationId)
     const federationName = federation?.name
-
-    const amountText = amountUtils.formatNumber(
-        amountUtils.msatToSat(transaction.amount),
-    )
 
     const title = federationName
         ? `${federationName}: ${t('phrases.payment-received')}`
         : t('phrases.payment-received')
-
-    const body = `${amountText} ${t('words.sats')}`
 
     const uniqueId = `payment-${uuidv4()}`
 
@@ -220,6 +200,88 @@ export const displayPaymentReceivedNotification = async (
             },
         },
     )
+}
+
+/** Displays Payment Notifications */
+export const displayPaymentReceivedNotification = async (
+    event: TransactionEvent,
+    t: TFunction,
+): Promise<void> => {
+    let transaction: TransactionListEntry | undefined
+
+    if (typeof event.transaction === 'object' && event.transaction !== null) {
+        transaction = event.transaction as TransactionListEntry
+    }
+
+    if (!transaction) return
+
+    const direction = getTxnDirection(transaction)
+
+    // Skip outbound payments
+    if (direction !== TransactionDirection.receive) return
+
+    // Skip on-chain transactions until claimed
+    if (
+        transaction.kind === 'onchainDeposit' &&
+        transaction.state?.type !== 'claimed'
+    )
+        return
+
+    // Skip ecash transactions until done
+    if (transaction.kind === 'oobReceive' && transaction.state?.type !== 'done')
+        return
+
+    // `transaction.unit` branches sats vs. USDT formatting (see
+    // `formatNotificationAmount`'s doc comment). `unit: 'other'` means the
+    // denomination is unknown/unstamped - there's no safe way to guess its
+    // magnitude, so skip the notification entirely rather than show a
+    // wildly-wrong amount.
+    const amountText = formatNotificationAmount(transaction)
+    if (amountText === undefined) {
+        log.warn(
+            'Skipping payment-received notification for unknown-unit transaction',
+            transaction.id,
+        )
+        return
+    }
+
+    await dispatchPaymentReceivedNotification(
+        event.federationId,
+        amountText,
+        t,
+    )
+}
+
+/**
+ * Displays a local notification for a USDT on-chain deposit that has been
+ * claimed into USDT-denominated e-cash.
+ *
+ * NOTE on double-notification: claiming a USDT deposit goes through the
+ * fedimint-client `usdt` module's `claim()` call (crates/federations/src/
+ * federation_v2/usdt.rs `usdt_claim_if_claimable`), which is a distinct
+ * module/operation from the mintv2 ecash operations that trigger
+ * `send_transaction_event` (see e.g. `usdt_receive_ecash` a few lines
+ * above it in the same file, which explicitly calls
+ * `self.send_transaction_event(...)`). The claim path never calls
+ * `send_transaction_event`, and the bridge's generic operation dispatch
+ * (`subscribe_to_all_operations`/`subscribe_to_operation` in
+ * federation_v2/mod.rs) only recognizes lightning/mint/wallet/stability-
+ * pool module kinds - `usdt`-kind operations fall through untouched. So a
+ * claimed USDT deposit emits exactly one event, the typed `usdtDeposit`
+ * event this function handles - never also a generic `transaction` event -
+ * and no dedup logic is needed here.
+ */
+export const displayUsdtDepositReceivedNotification = async (
+    event: UsdtDepositEvent,
+    t: TFunction,
+): Promise<void> => {
+    if (event.state.type !== 'claimed') return
+
+    const body = t('feature.usdt.deposit-received-notification', {
+        amount: formatUsdtMicros(event.state.amount),
+    })
+
+    await dispatchPaymentReceivedNotification(event.federationId, body, t)
 }
 
 export const displayMessageReceivedNotification = async (

@@ -20,6 +20,7 @@ import {
     DeviceRegistrationEvent,
     LogEvent,
     PanicEvent,
+    UsdtDepositEvent,
 } from '@fedi/common/types/bindings'
 import { makeLog } from '@fedi/common/utils/log'
 
@@ -30,7 +31,10 @@ import theme from '../styles/theme'
 import { generateDeviceId } from '../utils/device-info'
 import { useAppIsInForeground } from '../utils/hooks/notifications'
 import { formatBridgeFfiLog } from '../utils/log'
-import { displayPaymentReceivedNotification } from '../utils/notifications'
+import {
+    displayPaymentReceivedNotification,
+    displayUsdtDepositReceivedNotification,
+} from '../utils/notifications'
 
 const log = makeLog('FediBridgeInitializer')
 const ffiLog = makeLog('ffi')
@@ -105,7 +109,31 @@ export const FediBridgeInitializer: React.FC<Props> = ({ children }) => {
             },
         )
 
-        return () => unsubscribeTransaction()
+        // USDT on-chain deposits are claimed via a distinct bridge module
+        // (not a mintv2 ecash operation), so they never surface through the
+        // generic `transaction` event above - they need their own listener.
+        // See `displayUsdtDepositReceivedNotification`'s doc comment for why
+        // this can't double-fire alongside a `transaction` event.
+        const unsubscribeUsdtDeposit = fedimint.addListener(
+            'usdtDeposit',
+            async (event: UsdtDepositEvent) => {
+                if (event.state.type !== 'claimed') return
+                if (isForeground)
+                    return log.info(
+                        'USDT deposit claimed (foreground - no notification)',
+                    )
+
+                log.info(
+                    'USDT deposit claimed (background - delivering notification)',
+                )
+                await displayUsdtDepositReceivedNotification(event, t)
+            },
+        )
+
+        return () => {
+            unsubscribeTransaction()
+            unsubscribeUsdtDeposit()
+        }
     }, [t, isForeground])
 
     useEffect(() => {
