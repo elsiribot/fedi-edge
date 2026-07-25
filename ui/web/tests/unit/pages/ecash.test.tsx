@@ -7,6 +7,7 @@ import {
     createMockFederationPreview,
     mockFederation1,
 } from '@fedi/common/tests/mock-data/federation'
+import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import i18n from '../../../src/localization/i18n'
 import EcashPage from '../../../src/pages/ecash'
@@ -25,6 +26,7 @@ const defaultParseEcashReturn = {
         amount: 10000, // msats (10 sats)
         federation_id: '1',
         federation_type: 'joined',
+        unit: 'bitcoin',
     },
     ecashToken: '123',
     federation: mockFederation1,
@@ -114,9 +116,93 @@ describe('/pages/ecash', () => {
                         amount: 10000,
                         federation_id: '1',
                         federation_type: 'joined',
+                        unit: 'bitcoin',
                     },
                     '123',
                 )
+            })
+        })
+    })
+
+    describe('when the ecash is denominated in USDT', () => {
+        beforeEach(() => {
+            parseEcashReturn = {
+                ...defaultParseEcashReturn,
+                parsed: {
+                    amount: 5_000_000, // 5 USDT, in micros
+                    federation_id: '1',
+                    federation_type: 'joined',
+                    unit: 'usdt',
+                },
+            }
+        })
+
+        it('should show the amount formatted as USDT, never SATS', async () => {
+            renderWithProviders(<EcashPage />, { store })
+
+            await waitFor(() => {
+                expect(
+                    screen.getByText(formatUsdtMicros(5_000_000)),
+                ).toBeInTheDocument()
+                expect(screen.queryByText(/SATS/)).not.toBeInTheDocument()
+            })
+        })
+
+        it('should call claimEcash with the usdt-stamped parsed ecash', async () => {
+            renderWithProviders(<EcashPage />, { store })
+
+            const button = screen.getByLabelText(
+                i18n.t('feature.ecash.claim-ecash'),
+            )
+            user.click(button)
+
+            await waitFor(() => {
+                expect(claimEcashSpy).toHaveBeenCalledWith(
+                    {
+                        amount: 5_000_000,
+                        federation_id: '1',
+                        federation_type: 'joined',
+                        unit: 'usdt',
+                    },
+                    '123',
+                )
+            })
+        })
+    })
+
+    describe('when the ecash note has no recognized unit', () => {
+        beforeEach(() => {
+            parseEcashReturn = {
+                ...defaultParseEcashReturn,
+                parsed: {
+                    amount: 10000,
+                    federation_invite: 'invite-code',
+                    federation_type: 'notJoined',
+                    unit: null,
+                },
+                federation: createMockFederationPreview(),
+            }
+        })
+
+        it('should render the bare amount without a SATS or USDT label', async () => {
+            renderWithProviders(<EcashPage />, { store })
+
+            await waitFor(() => {
+                expect(screen.getByText('10000')).toBeInTheDocument()
+                expect(screen.queryByText(/SATS/)).not.toBeInTheDocument()
+                expect(screen.queryByText(/USDT/)).not.toBeInTheDocument()
+            })
+        })
+
+        it('should show a neutral notice that the asset is unknown', async () => {
+            renderWithProviders(<EcashPage />, { store })
+
+            await waitFor(() => {
+                expect(
+                    screen.getByText(
+                        i18n.t('feature.ecash.unknown-asset-notice'),
+                    ),
+                ).toBeInTheDocument()
             })
         })
     })
@@ -129,6 +215,7 @@ describe('/pages/ecash', () => {
                     amount: 10000,
                     federation_invite: 'invite-code',
                     federation_type: 'notJoined',
+                    unit: 'bitcoin',
                 },
                 federation: createMockFederationPreview({
                     meta: { new_members_disabled: 'true' },

@@ -22,9 +22,8 @@ type Props = {
     /** Optional formatted secondary amount (BTC shows a fiat line; USDT has none) */
     formattedSecondaryAmount?: string
     /**
-     * Web claim link for the Share button. Omitted for USDT until the web
-     * claim page is unit-aware (Task 17); when undefined the Share button
-     * falls back to sharing the raw ecash token instead of a wrong-asset page.
+     * Web claim link for the Share button; when undefined the Share button
+     * falls back to sharing the raw ecash token instead of a web link.
      */
     shareUrl?: string
     /** Reclaims the notes + surfaces the result; wired by each thin screen */

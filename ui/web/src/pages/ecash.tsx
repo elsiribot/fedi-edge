@@ -4,8 +4,10 @@ import { Trans, useTranslation } from 'react-i18next'
 
 import { useClaimEcash, useParseEcash } from '@fedi/common/hooks/pay'
 import { useToast } from '@fedi/common/hooks/toast'
+import { RpcEcashInfo } from '@fedi/common/types/bindings'
 import amountUtils from '@fedi/common/utils/AmountUtils'
 import { getFederationTosUrl } from '@fedi/common/utils/FederationUtils'
+import { formatUsdtMicros } from '@fedi/common/utils/usdt'
 
 import { Button } from '../components/Button'
 import { ContentBlock } from '../components/ContentBlock'
@@ -18,6 +20,25 @@ import { Text } from '../components/Text'
 import { homeRoute, walletRoute } from '../constants/routes'
 import { styled, theme } from '../styles'
 import { getHashParams } from '../utils/linking'
+
+// Renders the ecash amount according to the unit stamped on the note.
+// `unit` is only nullable for `notJoined` (legacy, unitless) notes -- those
+// must never be rendered as "SATS", since we don't actually know the asset.
+function getEcashAmountDisplay(parsedEcash: RpcEcashInfo) {
+    const { unit, amount } = parsedEcash
+
+    if (unit === 'usdt') {
+        return { label: formatUsdtMicros(amount), unknownUnit: false }
+    }
+    if (unit === 'bitcoin') {
+        return {
+            label: `${amountUtils.msatToSatString(amount)} SATS`,
+            unknownUnit: false,
+        }
+    }
+    // unit is `null` or `'other'` -- render the bare amount, no unit label
+    return { label: `${amount}`, unknownUnit: true }
+}
 
 function EcashPage() {
     const { t } = useTranslation()
@@ -112,12 +133,18 @@ function EcashPage() {
             </>
         )
     } else if (newMembersDisabled) {
+        const { label, unknownUnit } = getEcashAmountDisplay(parsedEcash)
         content = (
             <Content>
                 <Icon icon="AlertWarningTriangle" size="lg" />
                 <Text variant="h2" weight="medium">
-                    {amountUtils.msatToSatString(parsedEcash.amount)} SATS
+                    {label}
                 </Text>
+                {unknownUnit && (
+                    <Text variant="small" css={{ color: theme.colors.grey }}>
+                        {t('feature.ecash.unknown-asset-notice')}
+                    </Text>
+                )}
                 <Text variant="body">
                     {t('feature.ecash.claim-ecash-new-members-disabled')}
                 </Text>
@@ -129,12 +156,18 @@ function EcashPage() {
             </Button>
         )
     } else {
+        const { label, unknownUnit } = getEcashAmountDisplay(parsedEcash)
         content = (
             <Content>
                 <Icon icon="Cash" size="lg" />
                 <Text variant="h2" weight="medium">
-                    {amountUtils.msatToSatString(parsedEcash.amount)} SATS
+                    {label}
                 </Text>
+                {unknownUnit && (
+                    <Text variant="small" css={{ color: theme.colors.grey }}>
+                        {t('feature.ecash.unknown-asset-notice')}
+                    </Text>
+                )}
                 <Text variant="body">
                     {t('feature.ecash.claim-ecash-description')}
                 </Text>

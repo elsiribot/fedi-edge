@@ -1,7 +1,11 @@
 import { act, waitFor } from '@testing-library/react'
 
-import { useParseEcash } from '../../../hooks/pay'
-import { setFederations, setupStore } from '../../../redux'
+import { useClaimEcash, useParseEcash } from '../../../hooks/pay'
+import {
+    selectUsdtBalanceMicros,
+    setFederations,
+    setupStore,
+} from '../../../redux'
 import { LoadedFederation, MSats } from '../../../types'
 import { RpcEcashInfo, RpcFederationPreview } from '../../../types/bindings'
 import * as FederationUtils from '../../../utils/FederationUtils'
@@ -27,6 +31,13 @@ const buildJoinedEcash = (): RpcEcashInfo => ({
     federation_id: mockFederation1.id,
     amount: 10000 as MSats,
     unit: 'bitcoin',
+})
+
+const buildJoinedUsdtEcash = (): RpcEcashInfo => ({
+    federation_type: 'joined',
+    federation_id: mockFederation1.id,
+    amount: 5_000_000 as MSats,
+    unit: 'usdt',
 })
 
 describe('common/hooks/pay', () => {
@@ -115,6 +126,52 @@ describe('common/hooks/pay', () => {
             )
 
             expect(result.current.newMembersDisabled).toBe(false)
+        })
+    })
+
+    describe('useClaimEcash › unit routing', () => {
+        let store: ReturnType<typeof setupStore>
+
+        beforeEach(() => {
+            store = setupStore()
+            jest.clearAllMocks()
+        })
+
+        it('redeems usdt-denominated notes via usdtReceiveEcash, not the bitcoin receiveEcash thunk, and refreshes the usdt balance', async () => {
+            const fedimint = createMockFedimintBridge({
+                usdtReceiveEcash: Promise.resolve(5_000_000),
+                usdtBalance: Promise.resolve(5_000_000),
+                receiveEcash: Promise.resolve([0, 'op-id']),
+            })
+            const { result } = renderHookWithState(
+                () => useClaimEcash(),
+                store,
+                fedimint,
+            )
+
+            await act(() =>
+                result.current.claimEcash(buildJoinedUsdtEcash(), 'usdt-token'),
+            )
+
+            await waitFor(() => {
+                expect(result.current.claimed).toBe(true)
+                expect(result.current.isError).toBe(false)
+            })
+
+            expect(fedimint.usdtReceiveEcash).toHaveBeenCalledWith(
+                'usdt-token',
+                mockFederation1.id,
+            )
+            expect(fedimint.receiveEcash).not.toHaveBeenCalled()
+
+            await waitFor(() => {
+                expect(
+                    selectUsdtBalanceMicros(
+                        store.getState(),
+                        mockFederation1.id,
+                    ),
+                ).toBe(5_000_000)
+            })
         })
     })
 })

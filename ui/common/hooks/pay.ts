@@ -5,6 +5,7 @@ import {
     joinFederation,
     receiveEcash,
     refreshFederations,
+    refreshUsdtBalance,
     listGateways,
     selectFederation,
     selectLoadedFederation,
@@ -526,18 +527,28 @@ export function useClaimEcash() {
                     throw new Error('No federation ID found for this ecash')
                 }
 
-                const result = await dispatch(
-                    receiveEcash({
-                        fedimint,
-                        federationId,
-                        ecash: decodeURIComponent(ecashToken),
-                    }),
-                ).unwrap()
+                const decodedEcash = decodeURIComponent(ecashToken)
 
-                if (result.status === 'failed') {
-                    throw new Error(
-                        result.error ?? 'ReceiveEcash transaction failed',
-                    )
+                if (parsedEcash.unit === 'usdt') {
+                    // USDT-denominated notes are redeemed via the USDT
+                    // module directly rather than the bitcoin receiveEcash
+                    // thunk (mirrors claimMatrixPayment in redux/matrix.ts).
+                    await fedimint.usdtReceiveEcash(decodedEcash, federationId)
+                    dispatch(refreshUsdtBalance({ fedimint, federationId }))
+                } else {
+                    const result = await dispatch(
+                        receiveEcash({
+                            fedimint,
+                            federationId,
+                            ecash: decodedEcash,
+                        }),
+                    ).unwrap()
+
+                    if (result.status === 'failed') {
+                        throw new Error(
+                            result.error ?? 'ReceiveEcash transaction failed',
+                        )
+                    }
                 }
 
                 setEcashClaimed(true)

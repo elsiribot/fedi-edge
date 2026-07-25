@@ -2,6 +2,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { WEB_APP_URL } from '@fedi/common/constants/api'
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
 import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
@@ -60,11 +61,7 @@ const UsdtSendOfflineQr: React.FC<Props> = ({ navigation, route }: Props) => {
         <OfflineQrScreen
             ecash={ecash}
             formattedPrimaryAmount={formattedAmount}
-            // TODO(Task 17): re-enable the web share link once the web ecash
-            // claim page renders v2/USDT notes as USDT instead of SATS. Until
-            // then omit shareUrl so Share falls back to the raw ecash token
-            // rather than exposing a wrong-asset claim page.
-            shareUrl={undefined}
+            shareUrl={`${WEB_APP_URL}/link#screen=ecash&id=${ecash}`}
             onCancel={handleCancelEcashNotes}
             cancelDisabled={isCancelling}
             onConfirmSent={() => {

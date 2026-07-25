@@ -736,6 +736,7 @@
             "terms-link": "Please read and agree to the federation's terms of service before claiming your ecash: {{tos_url}}",
             "terms-link-web": "Please read and agree to the federation's terms of service before claiming your ecash: <url />",
             "unknown-federation-no-invite": "Ecash is from an unknown wallet service and has no embedded invite",
+            "unknown-asset-notice": "We can't confirm what asset this ecash represents.",
             "invalid-ecash-token": "Invalid ecash token",
             "invalid-ecash-token-description": "Your ecash token is invalid and cannot be claimed.",
             "join-and-claim": "Join & claim",
