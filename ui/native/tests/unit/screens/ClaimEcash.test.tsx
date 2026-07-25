@@ -102,6 +102,7 @@ describe('/screens/ClaimEcash', () => {
                     amount: 10000,
                     federation_id: '1',
                     federation_type: 'joined',
+                    unit: 'bitcoin',
                 },
                 '123',
             )
