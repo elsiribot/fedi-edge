@@ -280,13 +280,9 @@ pub struct UsdtDepositEvent {
 #[ts(export)]
 pub enum UsdtDepositState {
     #[serde(rename_all = "camelCase")]
-    Claimed {
-        amount: crate::usdt::RpcUsdtAmount,
-    },
+    Claimed { amount: crate::usdt::RpcUsdtAmount },
     #[serde(rename_all = "camelCase")]
-    Failed {
-        reason: String,
-    },
+    Failed { reason: String },
 }
 
 /// Progress of a USDT on-chain withdrawal initiated via `usdtWithdraw`.

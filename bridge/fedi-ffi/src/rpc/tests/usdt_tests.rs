@@ -109,12 +109,22 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
             EvmAddress([0u8; 20]).to_string(),
         );
         // cggmp21 DKG exceeds the default 60s config-gen timeout.
-        std::env::set_var(devimint::envs::FM_DEVIMINT_CONFIG_GEN_TIMEOUT_SECS_ENV, "300");
+        std::env::set_var(
+            devimint::envs::FM_DEVIMINT_CONFIG_GEN_TIMEOUT_SECS_ENV,
+            "300",
+        );
     }
 
     info!("starting the USDT-only federation (real cggmp21 DKG, takes minutes)");
-    let fed = Federation::new(&process_mgr, bitcoind, false, false, 0, "default".to_string())
-        .await?;
+    let fed = Federation::new(
+        &process_mgr,
+        bitcoind,
+        false,
+        false,
+        0,
+        "default".to_string(),
+    )
+    .await?;
     let invite_code = fed.invite_code()?;
 
     info!("joining via the bridge");
@@ -160,6 +170,15 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
         "deposit address must be a 0x-prefixed EVM address, got {address}"
     );
 
+    // Address reuse policy: until an address has actually received a
+    // deposit, repeated generate calls must hand out the SAME address.
+    let address_again = federation.usdt_generate_deposit_address().await?;
+    ensure!(
+        address_again == address,
+        "generate before any deposit must return the same address \
+         (got {address_again}, expected {address})"
+    );
+
     // Fees scale with anvil's (high) default gas price, so size everything
     // relative to the current quote: the deposit fee is deducted from the
     // claim and the withdrawal needs its own fee headroom on top.
@@ -173,9 +192,11 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
     transfer_erc20_from_account_1(&anvil, token, deposit_address, transfer_amount).await?;
     mine_blocks(&anvil, 3).await?;
 
-    // The bridge's background watcher (spawned by usdtGenerateDepositAddress)
+    // The bridge's long-lived deposit service (usdtGenerateDepositAddress
+    // marked the address hot, so it is polled every
+    // `federations::federation_v2::usdt::USDT_HOT_POLL_INTERVAL` = 15s)
     // must observe, claim, and mint USDT e-cash without further prompting.
-    info!("waiting for the background watcher to auto-claim the deposit");
+    info!("waiting for the deposit service to auto-claim the deposit");
     poll_until(Duration::from_secs(300), Duration::from_secs(2), || async {
         Ok(federation.usdt_balance().await?.0 > 0)
     })
@@ -206,6 +227,19 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
         "usdtListDeposits must include the funded address"
     );
 
+    // Address rotation policy: now that the address has received (and
+    // claimed) a deposit, the next generate call must rotate to a fresh one.
+    let rotated_address = federation.usdt_generate_deposit_address().await?;
+    ensure!(
+        rotated_address != address,
+        "generate after a credited deposit must rotate to a fresh address \
+         (got {rotated_address} again)"
+    );
+    ensure!(
+        rotated_address.starts_with("0x") && rotated_address.len() == 42,
+        "rotated deposit address must be a 0x-prefixed EVM address, got {rotated_address}"
+    );
+
     // Withdrawal: submit and watch it reach the MPC signing pipeline. (On-
     // chain confirmation needs a bundler-API-capable RPC; see module docs.)
     // The recipient nets `withdraw_amount - fee`, so pick an amount with a
@@ -220,7 +254,11 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
         balance.0,
         max_fee.0,
     );
-    info!(amount = withdraw_amount.0, max_fee = max_fee.0, "withdrawing to an external address");
+    info!(
+        amount = withdraw_amount.0,
+        max_fee = max_fee.0,
+        "withdrawing to an external address"
+    );
     let txid = federation
         .usdt_withdraw(holder.to_string(), withdraw_amount, max_fee)
         .await?;

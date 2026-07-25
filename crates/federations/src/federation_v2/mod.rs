@@ -12,7 +12,7 @@ use std::future::Future;
 use std::pin::pin;
 use std::str::FromStr;
 use std::sync::{Arc, Weak};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use ::serde::{Deserialize, Serialize};
 use anyhow::{Context, Result, anyhow, bail, ensure};
@@ -75,6 +75,7 @@ use fedimint_mint_client::api::MintFederationApi;
 use fedimint_mint_client::config::MintClientConfig;
 use fedimint_mint_client::{MintClientInit, MintClientModule};
 use fedimint_mintv2_client::MintClientModule as MintV2ClientModule;
+use fedimint_usdt_common::EvmAddress;
 use fedimint_wallet_client::{DepositStateV2, PegOutFees, WalletClientInit};
 use fedimint_walletv2_client::WalletClientModule as WalletV2ClientModule;
 use futures::{FutureExt, Stream, StreamExt};
@@ -402,6 +403,16 @@ pub struct FederationV2 {
     pub spend_guard: Mutex<()>,
     // Mutex to prevent concurrent generate_ecash because logic is very fragile.
     pub generate_ecash_lock: Mutex<()>,
+    // Serializes USDT deposit claims across the long-lived deposit service
+    // and the usdtCheckDeposits/usdtRecoverDeposits RPC paths, so concurrent
+    // claimers can't race each other into rejected claim transactions
+    // (cf. `spend_guard`). Claimable state is re-read under this lock.
+    pub usdt_claim_guard: Mutex<()>,
+    // In-memory "hot" USDT deposit-address hint: set when
+    // `usdt_generate_deposit_address` hands an address to the UI, cleared on
+    // claim or expiry. The USDT deposit service polls the hot address at a
+    // fast cadence (and wakes immediately on changes to this watch channel).
+    pub usdt_deposit_hint: tokio::sync::watch::Sender<Option<(EvmAddress, SystemTime)>>,
     pub this_weak: Weak<Self>,
     pub guard: FederationLockGuard,
     // Stability pool v2 services for syncing accout history between client and server
@@ -504,6 +515,8 @@ impl FederationV2 {
             client,
             spend_guard: Default::default(),
             generate_ecash_lock: Default::default(),
+            usdt_claim_guard: Default::default(),
+            usdt_deposit_hint: tokio::sync::watch::Sender::new(None),
             this_weak: weak.clone(),
             guard,
             multispend_services,
@@ -545,7 +558,7 @@ impl FederationV2 {
     /// saved to db.
     async fn start_background_tasks(&self) {
         self.subscribe_balance_updates().await;
-        self.spawn_usdt_startup_claimer();
+        self.spawn_usdt_deposit_service();
         self.spawn_cancellable("backup_service", move |fed| async move {
             fed.backup_service.run_continuously(&fed.client).await;
         });

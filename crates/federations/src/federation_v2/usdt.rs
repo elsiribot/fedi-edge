@@ -13,6 +13,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use fedimint_core::base32::{FEDIMINT_PREFIX, decode_prefixed, encode_prefixed};
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
+use fedimint_core::secp256k1::PublicKey;
 use fedimint_core::task::sleep;
 use fedimint_core::{OutPoint, TransactionId};
 use fedimint_mintv2_client::{
@@ -24,25 +25,37 @@ use fedimint_usdt_client::db::{ClaimKeyKey, ClaimKeyPrefixAll};
 use fedimint_usdt_common::{BootstrapState, EvmAddress, USDT_UNIT, UsdtAmount, WithdrawalStatus};
 use futures::StreamExt;
 use rpc_types::error::ErrorCode;
-use rpc_types::event::{Event, UsdtDepositEvent, UsdtDepositState, UsdtWithdrawalEvent};
+use rpc_types::event::{
+    Event, TypedEventExt as _, UsdtDepositEvent, UsdtDepositState, UsdtWithdrawalEvent,
+};
 use rpc_types::usdt::{
     RpcUsdtAmount, RpcUsdtDepositStatus, RpcUsdtGenerateEcashResponse, RpcUsdtStatus,
     RpcUsdtTransaction, RpcUsdtTransactionKind, RpcUsdtWithdrawalStatus,
 };
-use runtime::utils::to_unix_time;
 use rpc_types::{
     EcashReceiveMetadata, EcashReceiveReason, EcashSendMetadata, FrontendMetadata, RpcAmount,
 };
-use rpc_types::event::TypedEventExt as _;
-use tracing::{info, instrument, warn};
+use runtime::utils::to_unix_time;
+use tracing::{info, warn};
 
 use super::FederationV2;
 use super::client::ClientExt as _;
 
-/// How long a freshly generated deposit address is actively watched for an
-/// incoming on-chain deposit before the background watcher gives up (the
-/// startup sweep and `usdtCheckDeposits` still pick it up later).
+/// How long a deposit address handed out by `usdtGenerateDepositAddress`
+/// stays "hot" (polled at [`USDT_HOT_POLL_INTERVAL`] by the deposit service)
+/// before falling back to the slow full-scan cadence. The address stays
+/// valid forever either way.
 const DEPOSIT_WATCH_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Fast poll cadence of the USDT deposit service for the hot (most recently
+/// handed out) deposit address. The e2e test relies on this being small
+/// relative to its wait-for-claim deadline.
+pub const USDT_HOT_POLL_INTERVAL: Duration = Duration::from_secs(15);
+
+/// Cadence of the USDT deposit service's full pass over ALL known deposit
+/// addresses (re-arm the guardians' deposit checker + claim anything
+/// claimable). Catches late deposits to old addresses.
+pub const USDT_FULL_SCAN_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// How long we poll a submitted withdrawal for on-chain confirmation.
 const WITHDRAWAL_WATCH_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
@@ -89,12 +102,24 @@ impl FederationV2 {
         })
     }
 
-    /// Allocates a fresh deposit address and spawns a background watcher that
-    /// claims the deposit into USDT e-cash once the federation credits it.
+    /// Returns the current deposit address, allocating a fresh one only if
+    /// the newest allocated address has already received a deposit (so
+    /// repeated calls hand out the SAME address until it is actually used),
+    /// and marks it hot so the deposit service polls it at a fast cadence.
+    /// The claim into USDT e-cash happens in the background once the
+    /// federation credits the deposit.
     pub async fn usdt_generate_deposit_address(&self) -> Result<String> {
         let usdt = self.client.usdt()?;
-        let (_keypair, address) = usdt.allocate_deposit().await?;
-        self.spawn_usdt_deposit_watcher(address, DEPOSIT_WATCH_DEADLINE);
+        let (_keypair, address, newly_allocated) = usdt.current_or_allocate_deposit().await?;
+        if newly_allocated {
+            info!(%address, "allocated a fresh usdt deposit address");
+        }
+        // Mark the address hot: the deposit service wakes on this watch
+        // channel and polls it every USDT_HOT_POLL_INTERVAL until the
+        // deposit is claimed or the hint expires.
+        let expires_at = fedimint_core::time::now() + DEPOSIT_WATCH_DEADLINE;
+        self.usdt_deposit_hint
+            .send_replace(Some((address, expires_at)));
         Ok(address.to_string())
     }
 
@@ -150,8 +175,11 @@ impl FederationV2 {
         Ok(deposits)
     }
 
-    /// One-shot pass over all known deposit addresses: claims anything
-    /// claimable right now. Returns the number of deposits claimed.
+    /// One pass over all known deposit addresses: re-arms the guardians'
+    /// deposit checker for each (server-side watching is one-shot per
+    /// `check_deposit` call, so later deposits to a known address are only
+    /// observed if we keep re-arming) and claims anything claimable right
+    /// now. Returns the number of deposits claimed.
     pub async fn usdt_check_deposits(&self) -> Result<u32> {
         let usdt = self.client.usdt()?;
         let keypairs: Vec<_> = usdt
@@ -167,17 +195,12 @@ impl FederationV2 {
         let mut claimed = 0u32;
         for (ClaimKeyKey(address), keypair) in keypairs {
             let claim_pk = keypair.public_key();
-            let Ok(status) = usdt.deposit_status(claim_pk).await else {
-                continue;
-            };
-            if status.claimable.0 == 0 {
-                continue;
+            if let Err(err) = usdt.check_deposit(claim_pk).await {
+                warn!(%address, ?err, "failed to re-arm usdt deposit check");
             }
-            match usdt.claim(claim_pk).await {
-                Ok(result) => {
-                    claimed += 1;
-                    self.emit_usdt_deposit_claimed(address, result.claimed);
-                }
+            match self.usdt_claim_if_claimable(address, claim_pk).await {
+                Ok(true) => claimed += 1,
+                Ok(false) => {}
                 Err(err) => {
                     warn!(%address, ?err, "failed to claim usdt deposit");
                 }
@@ -280,10 +303,8 @@ impl FederationV2 {
         drop(spend_guard);
         // Embed a federation invite so non-member recipients can
         // join-then-claim (skipped gracefully by older clients).
-        if include_invite {
-            if let Ok(invite) = self.get_invite_code().await.parse() {
-                ecash = ecash.with_invite(invite);
-            }
+        if include_invite && let Ok(invite) = self.get_invite_code().await.parse() {
+            ecash = ecash.with_invite(invite);
         }
         let ecash = encode_prefixed(FEDIMINT_PREFIX, &ecash);
         Ok(RpcUsdtGenerateEcashResponse {
@@ -373,22 +394,20 @@ impl FederationV2 {
                 },
                 "mintv2" if include_mintv2 => {
                     match entry.try_meta::<MintV2OperationMeta>() {
-                        Ok(MintV2OperationMeta::Send { ecash, .. }) => {
-                            usdt_ecash_amount(&ecash).map(|amount| RpcUsdtTransaction {
+                        Ok(MintV2OperationMeta::Send { ecash, .. }) => usdt_ecash_amount(&ecash)
+                            .map(|amount| RpcUsdtTransaction {
                                 created_at,
                                 amount,
                                 incoming: false,
                                 kind: RpcUsdtTransactionKind::EcashSend,
-                            })
-                        }
-                        Ok(MintV2OperationMeta::Receive { ecash, .. }) => {
-                            usdt_ecash_amount(&ecash).map(|amount| RpcUsdtTransaction {
+                            }),
+                        Ok(MintV2OperationMeta::Receive { ecash, .. }) => usdt_ecash_amount(&ecash)
+                            .map(|amount| RpcUsdtTransaction {
                                 created_at,
                                 amount,
                                 incoming: true,
                                 kind: RpcUsdtTransactionKind::EcashReceive,
-                            })
-                        }
+                            }),
                         // reissues are internal bookkeeping, not user payments
                         Ok(MintV2OperationMeta::Reissue { .. }) | Err(_) => None,
                     }
@@ -402,42 +421,87 @@ impl FederationV2 {
         Ok(transactions)
     }
 
-    /// Startup pass: claim anything already claimable for our known deposit
-    /// addresses (covers deposits that landed while the app was closed).
-    pub(super) fn spawn_usdt_startup_claimer(&self) {
+    /// Spawns the long-lived per-federation USDT deposit service (replaces
+    /// the old one-shot startup claimer and the fire-and-forget per-address
+    /// watchers). It never dies on errors: transient federation-API failures
+    /// are logged and retried on the next tick, never surfaced as `Failed`.
+    pub(super) fn spawn_usdt_deposit_service(&self) {
         if !self.usdt_supported() {
             return;
         }
-        self.spawn_cancellable("usdt_startup_claimer", move |fed| async move {
-            match fed.usdt_check_deposits().await {
-                Ok(0) => {}
-                Ok(n) => info!(claimed = n, "usdt startup claimer claimed deposits"),
-                Err(err) => warn!(?err, "usdt startup claimer failed"),
-            }
+        self.spawn_cancellable("usdt_deposit_service", |fed| async move {
+            fed.run_usdt_deposit_service().await;
         });
     }
 
-    /// Watches a single deposit address until a deposit is claimed or the
-    /// deadline passes.
-    #[instrument(skip(self))]
-    fn spawn_usdt_deposit_watcher(&self, address: EvmAddress, deadline: Duration) {
-        self.spawn_cancellable("usdt_deposit_watcher", move |fed| async move {
-            if let Err(err) = fed.watch_usdt_deposit(address, deadline).await {
-                warn!(%address, ?err, "usdt deposit watcher failed");
-                fed.runtime
-                    .event_sink
-                    .typed_event(&Event::UsdtDeposit(UsdtDepositEvent {
-                        federation_id: fed.rpc_federation_id(),
-                        address: address.to_string(),
-                        state: UsdtDepositState::Failed {
-                            reason: format!("{err:#}"),
-                        },
-                    }));
+    /// The deposit service loop, two cadences in one:
+    /// - the "hot" address (most recently handed out via
+    ///   `usdtGenerateDepositAddress`, tracked in-memory via
+    ///   `usdt_deposit_hint`) is polled every [`USDT_HOT_POLL_INTERVAL`] until
+    ///   claimed or the hint expires;
+    /// - a full pass over ALL known addresses runs every
+    ///   [`USDT_FULL_SCAN_INTERVAL`] (the first pass runs immediately, claiming
+    ///   deposits that landed while the app was closed).
+    ///
+    /// Each poll re-arms the guardians' deposit checker (`check_deposit` is
+    /// idempotent server-side), reads `deposit_status` and claims if
+    /// claimable.
+    async fn run_usdt_deposit_service(&self) {
+        let mut hint_rx = self.usdt_deposit_hint.subscribe();
+        let mut next_full_scan = fedimint_core::time::now();
+        loop {
+            if fedimint_core::time::now() >= next_full_scan {
+                match self.usdt_check_deposits().await {
+                    Ok(0) => {}
+                    Ok(n) => info!(claimed = n, "usdt deposit service claimed deposits"),
+                    // Transient (e.g. mobile connectivity blip): warn and
+                    // retry next pass, never die, never emit Failed.
+                    Err(err) => warn!(?err, "usdt deposit full scan failed, will retry"),
+                }
+                next_full_scan = fedimint_core::time::now() + USDT_FULL_SCAN_INTERVAL;
             }
-        });
+
+            let hot = *hint_rx.borrow_and_update();
+            let hot_active = match hot {
+                Some((address, expires_at)) => {
+                    if fedimint_core::time::now() >= expires_at {
+                        info!(%address, "usdt hot deposit window expired without a deposit");
+                        self.usdt_clear_deposit_hint(address);
+                        false
+                    } else {
+                        if let Err(err) = self.usdt_poll_hot_deposit(address).await {
+                            warn!(%address, ?err, "usdt hot deposit poll failed, will retry");
+                        }
+                        true
+                    }
+                }
+                None => false,
+            };
+
+            let sleep_for = if hot_active {
+                USDT_HOT_POLL_INTERVAL
+            } else {
+                next_full_scan
+                    .duration_since(fedimint_core::time::now())
+                    .unwrap_or(Duration::ZERO)
+            };
+            tokio::select! {
+                () = sleep(sleep_for) => {}
+                // Wakes immediately when usdtGenerateDepositAddress installs
+                // a new hot address (or a claim/expiry clears it).
+                changed = hint_rx.changed() => {
+                    if changed.is_err() {
+                        // Sender dropped: the federation object is gone.
+                        return;
+                    }
+                }
+            }
+        }
     }
 
-    async fn watch_usdt_deposit(&self, address: EvmAddress, deadline: Duration) -> Result<()> {
+    /// One fast-cadence poll of the hot deposit address: re-arm the
+    /// guardians' deposit checker, then claim if claimable.
+    async fn usdt_poll_hot_deposit(&self, address: EvmAddress) -> Result<()> {
         let usdt = self.client.usdt()?;
         let keypair = usdt
             .db
@@ -448,28 +512,52 @@ impl FederationV2 {
             .await
             .ok_or_else(|| anyhow!("unknown deposit address {address}"))?;
         let claim_pk = keypair.public_key();
-
-        // Ask the federation to start watching the address on-chain.
         usdt.check_deposit(claim_pk).await?;
+        self.usdt_claim_if_claimable(address, claim_pk).await?;
+        Ok(())
+    }
 
-        let deadline_at = fedimint_core::time::now() + deadline;
-        let mut backoff = Duration::from_secs(2);
-        loop {
-            let status = usdt.deposit_status(claim_pk).await?;
-            if status.claimable.0 > 0 {
-                let result = usdt.claim(claim_pk).await?;
-                self.emit_usdt_deposit_claimed(address, result.claimed);
-                return Ok(());
-            }
-            if fedimint_core::time::now() >= deadline_at {
-                // Not an error: the address stays valid; the startup claimer /
-                // usdtCheckDeposits will claim a later deposit.
-                info!(%address, "usdt deposit watcher deadline passed without a deposit");
-                return Ok(());
-            }
-            sleep(backoff).await;
-            backoff = (backoff * 2).min(Duration::from_secs(30));
+    /// Claims `address`'s deposit if anything is claimable right now, under
+    /// the federation-wide `usdt_claim_guard` so concurrent claimers (the
+    /// deposit service and the `usdtCheckDeposits`/`usdtRecoverDeposits`
+    /// paths) can't race each other into rejected claim transactions.
+    /// Emits the `Claimed` event (net of the deposit fee, matching history
+    /// and balance) and rotates the hot hint off the address on success.
+    /// Returns whether a claim was made.
+    async fn usdt_claim_if_claimable(
+        &self,
+        address: EvmAddress,
+        claim_pk: PublicKey,
+    ) -> Result<bool> {
+        let usdt = self.client.usdt()?;
+        let _guard = self.usdt_claim_guard.lock().await;
+        // Re-read under the guard: another claimer may have won the race
+        // since the caller last looked.
+        let status = usdt.deposit_status(claim_pk).await?;
+        if status.claimable.0 == 0 {
+            return Ok(false);
         }
+        let result = usdt.claim(claim_pk).await?;
+        // The e-cash actually issued is claimed - fee; report net so the
+        // event amount matches history and the balance delta.
+        let net = UsdtAmount(result.claimed.0.saturating_sub(result.fee.0));
+        self.emit_usdt_deposit_claimed(address, net);
+        self.usdt_clear_deposit_hint(address);
+        Ok(true)
+    }
+
+    /// Clears the hot-address hint if it still points at `address` (claimed
+    /// or expired), waking the deposit service to fall back to the slow
+    /// cadence and letting the next `usdtGenerateDepositAddress` rotate.
+    fn usdt_clear_deposit_hint(&self, address: EvmAddress) {
+        self.usdt_deposit_hint.send_if_modified(|hint| {
+            if hint.is_some_and(|(hot, _)| hot == address) {
+                *hint = None;
+                true
+            } else {
+                false
+            }
+        });
     }
 
     fn emit_usdt_deposit_claimed(&self, address: EvmAddress, amount: UsdtAmount) {
