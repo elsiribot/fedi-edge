@@ -1,3 +1,4 @@
+mod router;
 mod v1;
 mod v2;
 
@@ -7,9 +8,9 @@ use fedimint_client::module::oplog::OperationLogEntry;
 use fedimint_core::core::OperationId;
 use fedimint_core::task::{MaybeSend, MaybeSync};
 use fedimint_core::{Amount, apply, async_trait_maybe_send};
+pub use router::MintOpsRouter;
 use rpc_types::{FrontendMetadata, RpcGenerateEcashResponse};
 pub use v1::MintOpsV1;
-#[allow(unused_imports)]
 pub use v2::MintOpsV2;
 
 use super::{FederationTransactionParts, FederationV2};

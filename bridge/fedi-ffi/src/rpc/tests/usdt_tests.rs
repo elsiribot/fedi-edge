@@ -28,7 +28,8 @@ use alloy::signers::local::PrivateKeySigner;
 use alloy::sol;
 use anyhow::{Context, bail, ensure};
 use devi::{DevFed, NostrRelay, Synapse};
-use devimint::external::{Anvil, Bitcoind};
+use devimint::cmd;
+use devimint::external::{Anvil, Bitcoind, Esplora};
 use devimint::federation::Federation;
 use fedimint_core::envs::{
     FM_DISABLE_BASE_FEES_ENV, FM_ENABLE_MODULE_LNV1_ENV, FM_ENABLE_MODULE_LNV2_ENV,
@@ -352,21 +353,22 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Mixed BTC+USDT federation coverage.
+/// Mixed BTC+USDT federation coverage (federation shape "d").
 ///
 /// Composes a devfed carrying the Bitcoin v1 modules (mintv1 + walletv1 +
 /// lnv1/lnv2) the USDT-only sibling omits, PLUS the usdt module and its
 /// USDT-denominated mintv2, then drives the bridge to prove BTC and USDT
 /// e-cash coexist and route by note unit.
 ///
-/// NOTE (composition probe): the bridge selects `MintOpsV2` whenever ANY
-/// mintv2 instance is present, and routes every Bitcoin e-cash op to
-/// `mintv2_of_unit(BITCOIN)`. So a *working* mixed federation requires TWO
-/// mintv2 instances -- one BITCOIN-denominated (the Bitcoin balance) and one
-/// USDT-denominated (the usdt module's mint). This test first asserts the
-/// devfed actually composed both; if the harness could only give the single
-/// USDT mintv2 (the known devimint one-instance-per-kind limitation), the
-/// probe fails loudly here rather than silently degrading to a USDT-only fed.
+/// This is the REAL shape a devfed can build: config-gen attaches exactly one
+/// instance per enabled module kind, so a federation can never carry both a
+/// BITCOIN mintv2 and the usdt module's USDT mintv2. The Bitcoin balance and
+/// e-cash therefore live in mintv1, and the mint-ops router
+/// (`federations::federation_v2::mint_ops::MintOpsRouter`) routes Bitcoin ops
+/// to mintv1 while USDT e-cash ops go to the USDT-denominated mintv2. This test
+/// asserts that split holds end-to-end: BTC ops touch only the Bitcoin balance,
+/// USDT ops touch only the USDT balance, and each note round-trips through the
+/// unit its wire format declares.
 #[tokio::test(flavor = "multi_thread")]
 async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
     use federations::federation_v2::client::ClientExt;
@@ -392,6 +394,14 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
         std::env::set_var("DEVI_SYNAPSE_SERVER", &synapse.url);
         std::env::set_var("DEVI_NOSTR_RELAY", &nostr_relay.url);
     }
+
+    // The v1 wallet CLIENT can only reach the chain via esplora (client-side
+    // bitcoind RPC is unsupported), and the federation's client config points
+    // wallet clients at http://127.0.0.1:{FM_PORT_ESPLORA}. Without esplora
+    // the funder's `await-deposit` polls forever, so start it before any
+    // pegin. (The USDT-only sibling has no wallet module and skips this.)
+    info!("starting esplora (v1 wallet client chain source)");
+    let _esplora = Esplora::new(&process_mgr, bitcoind.clone()).await?;
 
     info!("deploying test ERC-20 + ERC-4337 EntryPoint");
     let holder = account_1_address()?;
@@ -465,7 +475,12 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
         "fresh client must start at zero USDT balance"
     );
 
-    // Composition probe: enumerate the mintv2 instances the DKG actually built.
+    // Composition: enumerate the mintv2 instances the DKG actually built. This
+    // is shape (d): config-gen attaches exactly one instance per module kind,
+    // so the sole mintv2 is USDT-denominated (the usdt module mints claimed
+    // deposits into it) and there is NO BITCOIN mintv2. The Bitcoin balance
+    // therefore lives in mintv1, and the mint-ops router keeps it reachable
+    // alongside the USDT mintv2.
     let mintv2_units: Vec<AmountUnit> = federation
         .client
         .mintv2_instances()
@@ -486,41 +501,367 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
         ?mintv2_units,
         "joined mixed-fed module composition"
     );
-
-    let has_btc_mintv2 = mintv2_units.contains(&AmountUnit::BITCOIN);
-    let has_usdt_mintv2 = mintv2_units.contains(&USDT_UNIT);
     ensure!(
-        has_usdt_mintv2,
+        mintv2_units.contains(&USDT_UNIT),
         "expected a USDT-denominated mintv2 instance, got units {mintv2_units:?}"
     );
     ensure!(
-        has_btc_mintv2,
-        "MIXED-FED COMPOSITION BLOCKER: the devfed built mintv2 units {mintv2_units:?} \
-         (module kinds {module_kinds:?}) -- there is NO BITCOIN-denominated mintv2, so the \
-         bridge's MintOpsV2 Bitcoin balance/e-cash path (mintv2_of_unit(BITCOIN)) is dead. \
-         Composing a BITCOIN mintv2 alongside the usdt module's USDT mintv2 needs two \
-         instances of the mintv2 kind, which devimint's real-DKG config-gen cannot create \
-         (build_module_params_registry attaches exactly one instance per enabled kind, and \
-         fedimint-cli `admin setup set-local-params` exposes no module-instance-list override)."
+        !mintv2_units.contains(&AmountUnit::BITCOIN),
+        "shape (d) must have NO BITCOIN mintv2 (config-gen is one-instance-per-kind); \
+         got units {mintv2_units:?}"
+    );
+    ensure!(
+        federation.client.mint().is_ok(),
+        "shape (d) must carry mintv1 to hold the Bitcoin balance"
     );
 
-    // BTC e-cash path (only reachable if the BITCOIN mintv2 exists).
+    // --- Assertion 2: BTC funding lands in mintv1 (get_raw_balance > 0) ---
+    // Fund the Bitcoin balance the way the standard bridge tests do: peg a
+    // devimint client in, spend v1 OOBNotes from it, and reissue them through
+    // the bridge. `receive_ecash` on v1 OOBNotes must route to mintv1 (the
+    // router decodes the note format), crediting the Bitcoin balance.
+    ensure!(
+        federation.get_balance().await == fedimint_core::Amount::ZERO,
+        "fresh client must start at zero BTC balance"
+    );
+    let funder = fed.new_joined_client("mixed-btc-funder").await?;
+    // Hand-rolled pegin instead of `fed.pegin_client`: with 4 DKG'd fedimintd
+    // + synapse + anvil sharing the host, bitcoind's wallet block processing
+    // crawls (~2-3s per block), so devimint's single generatetoaddress(21)
+    // RPC blows its fixed 45s client timeout (surfacing as "Couldn't connect
+    // to host: Resource temporarily unavailable"). Mine block-by-block with
+    // retries instead; same protocol, sturdier transport.
+    let pegin_sats = 100_000u64;
+    let deposit_fees_sat = fed.deposit_fees()?.msats / 1000;
+    let (pegin_address, pegin_operation) = funder.get_deposit_addr().await?;
+    info!(%pegin_address, "funding the devimint client via pegin");
+    let bitcoind = fed.bitcoind.clone();
+    retry_flaky("bitcoind send_to", 5, || {
+        let addr = pegin_address.clone();
+        let bitcoind = bitcoind.clone();
+        async move {
+            bitcoind
+                .send_to(addr, pegin_sats + deposit_fees_sat)
+                .await
+                .map(|_| ())
+        }
+    })
+    .await?;
+    for i in 0..21 {
+        retry_flaky("bitcoind mine block", 5, || {
+            let bitcoind = bitcoind.clone();
+            async move { bitcoind.mine_blocks(1).await }
+        })
+        .await
+        .with_context(|| format!("mining block {i}"))?;
+    }
+    info!("mined 21 blocks; waiting for the funder deposit to confirm");
+    funder.await_deposit(&pegin_operation).await?;
+    let btc_notes = cmd!(funder, "spend", "--allow-overpay", "20000000") // 20_000 sats
+        .out_json()
+        .await?["notes"]
+        .as_str()
+        .context("fedimint-cli spend returned no notes")?
+        .to_owned();
+    let (recv_amount, _op) = federation
+        .receive_ecash(btc_notes, FrontendMetadata::default())
+        .await
+        .context("bridge receive_ecash of v1 BTC notes failed")?;
+    ensure!(
+        recv_amount > fedimint_core::Amount::ZERO,
+        "received BTC e-cash must be positive"
+    );
+    poll_until(Duration::from_secs(60), Duration::from_secs(1), || async {
+        Ok(federation.get_balance().await > fedimint_core::Amount::ZERO)
+    })
+    .await
+    .context("BTC e-cash was never credited to the mintv1 balance")?;
+    let btc_balance = federation.get_balance().await;
+    info!(btc_msats = btc_balance.msats, "BTC funded into mintv1");
+
+    // --- Assertion 3: BTC generateEcash -> validates as bitcoin (v1 path) and
+    // re-receives correctly ---
+    let btc_send_amount = fedimint_core::Amount::from_sats(1000);
     let btc_ecash = federation
-        .generate_ecash(
-            fedimint_core::Amount::from_sats(1000),
-            false,
-            FrontendMetadata::default(),
-        )
+        .generate_ecash(btc_send_amount, false, FrontendMetadata::default())
         .await
         .context("BTC generate_ecash failed")?;
     let parsed = bridge
         .federations
         .validate_ecash(btc_ecash.ecash.clone())
         .await?;
-    info!(?parsed, "parsed BTC ecash");
+    ensure!(
+        matches!(
+            parsed,
+            rpc_types::RpcEcashInfo::Joined {
+                unit: rpc_types::RpcEcashUnit::Bitcoin,
+                ..
+            }
+        ),
+        "BTC e-cash must validate as unit `bitcoin`, got {parsed:?}"
+    );
+    let btc_after_send = federation.get_balance().await;
+    ensure!(
+        btc_after_send < btc_balance,
+        "BTC send must reduce the Bitcoin balance ({} !< {})",
+        btc_after_send.msats,
+        btc_balance.msats
+    );
+    // Reissue the notes back through the generic receive path; they must land
+    // in mintv1 and restore the balance.
+    let (btc_reissued, _) = federation
+        .receive_ecash(btc_ecash.ecash.clone(), FrontendMetadata::default())
+        .await
+        .context("re-receiving BTC notes failed")?;
+    ensure!(
+        btc_reissued == btc_send_amount,
+        "re-received BTC amount {} must equal the sent {}",
+        btc_reissued.msats,
+        btc_send_amount.msats
+    );
+    poll_until(Duration::from_secs(60), Duration::from_secs(1), || async {
+        Ok(federation.get_balance().await > btc_after_send)
+    })
+    .await
+    .context("BTC balance never recovered after re-receiving own notes")?;
 
-    info!("mixed btc+usdt e2e composition probe complete");
+    // Settle to a stable Bitcoin baseline; every USDT op below must leave it
+    // untouched.
+    let btc_baseline = federation.get_balance().await;
+    info!(
+        btc_msats = btc_baseline.msats,
+        "BTC baseline before USDT ops"
+    );
+
+    // --- Fund USDT via the on-chain deposit flow (same as the sibling) ---
+    info!("waiting for the usdt module to report Ready");
+    poll_until(Duration::from_secs(180), Duration::from_secs(2), || async {
+        Ok(federation.usdt_status().await?.ready)
+    })
+    .await
+    .context("usdt module never reported Ready")?;
+    info!("waiting for a nonzero withdrawal fee quote (fee median)");
+    poll_until(Duration::from_secs(120), Duration::from_secs(1), || async {
+        Ok(federation
+            .usdt_withdraw_fee_quote(RpcUsdtAmount(MIN_NET_DEPOSIT))
+            .await
+            .map(|fee| fee.0 > 0)
+            .unwrap_or(false))
+    })
+    .await
+    .context("fee median never converged")?;
+    let address = federation.usdt_generate_deposit_address().await?;
+    let fee_quote = federation
+        .usdt_withdraw_fee_quote(RpcUsdtAmount(MIN_NET_DEPOSIT))
+        .await?;
+    let transfer_amount = UsdtAmount(MIN_NET_DEPOSIT + fee_quote.0 * 6);
+    let deposit_address: EvmAddress = address.parse()?;
+    info!(%address, amount = transfer_amount.0, "sending on-chain USDT to the deposit address");
+    transfer_erc20_from_account_1(&anvil, token, deposit_address, transfer_amount).await?;
+    mine_blocks(&anvil, 3).await?;
+    info!("waiting for the deposit service to auto-claim the deposit into USDT e-cash");
+    poll_until(Duration::from_secs(300), Duration::from_secs(2), || async {
+        Ok(federation.usdt_balance().await?.0 > 0)
+    })
+    .await
+    .context("deposit was never auto-claimed into USDT e-cash")?;
+    let usdt_funded = federation.usdt_balance().await?.0;
+    ensure!(
+        usdt_funded >= MIN_NET_DEPOSIT,
+        "claimed USDT balance {usdt_funded} must cover the net deposit {MIN_NET_DEPOSIT}"
+    );
+    // Funding USDT must NOT have touched the Bitcoin balance.
+    ensure!(
+        federation.get_balance().await == btc_baseline,
+        "USDT deposit must not change the Bitcoin balance"
+    );
+    info!(usdt = usdt_funded, "USDT funded via deposit; BTC untouched");
+
+    // --- Assertion 4: usdtGenerateEcash -> usdtReceiveEcash round-trip moves
+    // the USDT balance while BTC is unchanged ---
+    // mintv2's `send` rounds up to a multiple of the smallest client
+    // denomination (2^9 = 512), so pick a multiple to keep the exact-amount
+    // assertions below tight. A 512-multiple also can never equal the BTC
+    // op's msat amount (1_000_000 is not one), so assertion 6's "no BTC
+    // amounts in USDT history" check cannot collide.
+    let usdt_send = RpcUsdtAmount((usdt_funded / 16) & !511);
+    ensure!(usdt_send.0 > 0, "need a nonzero USDT send amount");
+    let usdt_note = federation
+        .usdt_generate_ecash(usdt_send, false, FrontendMetadata::default())
+        .await
+        .context("usdt_generate_ecash failed")?;
+    let usdt_after_send = federation.usdt_balance().await?.0;
+    ensure!(
+        usdt_after_send < usdt_funded,
+        "USDT send must reduce the USDT balance ({usdt_after_send} !< {usdt_funded})"
+    );
+    ensure!(
+        federation.get_balance().await == btc_baseline,
+        "USDT send must not change the Bitcoin balance"
+    );
+    let usdt_received = federation
+        .usdt_receive_ecash(usdt_note.ecash.clone())
+        .await
+        .context("usdt_receive_ecash failed")?;
+    ensure!(
+        usdt_received.0 == usdt_send.0,
+        "usdt_receive_ecash returned {} but sent {}",
+        usdt_received.0,
+        usdt_send.0
+    );
+    let usdt_after_roundtrip = federation.usdt_balance().await?.0;
+    ensure!(
+        usdt_after_roundtrip > usdt_after_send,
+        "receiving the USDT note back must restore USDT balance ({usdt_after_roundtrip} !> {usdt_after_send})"
+    );
+    ensure!(
+        federation.get_balance().await == btc_baseline,
+        "USDT receive must not change the Bitcoin balance"
+    );
+
+    // --- Assertion 5: generic receiveEcash on a USDT v2 note credits USDT,
+    // not BTC (the router dispatches by note format, then by unit) ---
+    let usdt_before_generic = federation.usdt_balance().await?.0;
+    let usdt_note_2 = federation
+        .usdt_generate_ecash(usdt_send, false, FrontendMetadata::default())
+        .await?;
+    let usdt_after_generic_send = federation.usdt_balance().await?.0;
+    let (generic_amt, _) = federation
+        .receive_ecash(usdt_note_2.ecash.clone(), FrontendMetadata::default())
+        .await
+        .context("generic receive_ecash of a USDT note failed")?;
+    ensure!(
+        generic_amt.msats == usdt_send.0,
+        "generic receive of the USDT note reported {} micros, expected {}",
+        generic_amt.msats,
+        usdt_send.0
+    );
+    poll_until(Duration::from_secs(60), Duration::from_secs(1), || async {
+        Ok(federation.usdt_balance().await?.0 > usdt_after_generic_send)
+    })
+    .await
+    .context("generic receive of USDT note never credited USDT")?;
+    let usdt_after_generic = federation.usdt_balance().await?.0;
+    ensure!(
+        usdt_after_generic >= usdt_before_generic,
+        "generic USDT receive must restore USDT balance ({usdt_after_generic} < {usdt_before_generic})"
+    );
+    ensure!(
+        federation.get_balance().await == btc_baseline,
+        "crediting a USDT note through the generic path must not change the Bitcoin balance"
+    );
+
+    // --- Assertion 8: a stamped USDT note validates as unit `usdt` ---
+    let usdt_parsed = bridge
+        .federations
+        .validate_ecash(usdt_note_2.ecash.clone())
+        .await?;
+    ensure!(
+        matches!(
+            usdt_parsed,
+            rpc_types::RpcEcashInfo::Joined {
+                unit: rpc_types::RpcEcashUnit::Usdt,
+                ..
+            }
+        ),
+        "USDT e-cash must validate as unit `usdt`, got {usdt_parsed:?}"
+    );
+
+    // --- Assertion 6: usdtListTransactions contains the USDT sends/receives
+    // with micro amounts and NOT the BTC ops ---
+    let usdt_txns = federation.usdt_list_transactions(50, None).await?;
+    ensure!(
+        usdt_txns
+            .iter()
+            .any(|tx| matches!(tx.kind, RpcUsdtTransactionKind::EcashSend)),
+        "USDT history must contain the USDT e-cash sends"
+    );
+    ensure!(
+        usdt_txns
+            .iter()
+            .any(|tx| matches!(tx.kind, RpcUsdtTransactionKind::EcashReceive)),
+        "USDT history must contain the USDT e-cash receives"
+    );
+    // Every USDT e-cash row carries a micro amount matching our send size, and
+    // the BTC ops (1000-sat sends/receives) never appear: had a BITCOIN mintv2
+    // op leaked in, its msats would render here as USDT micros.
+    ensure!(
+        usdt_txns
+            .iter()
+            .filter(|tx| matches!(
+                tx.kind,
+                RpcUsdtTransactionKind::EcashSend | RpcUsdtTransactionKind::EcashReceive
+            ))
+            .all(|tx| tx.amount.0 == usdt_send.0),
+        "USDT e-cash rows must carry the USDT micro amount {}, got {:?}",
+        usdt_send.0,
+        usdt_txns.iter().map(|tx| tx.amount.0).collect::<Vec<_>>()
+    );
+    ensure!(
+        !usdt_txns
+            .iter()
+            .any(|tx| tx.amount.0 == btc_send_amount.msats),
+        "USDT history must not contain the BTC op amount ({} msats)",
+        btc_send_amount.msats
+    );
+
+    // --- Assertion 7: cancel a generated USDT ecash -> USDT restored, BTC
+    // untouched (cancel routes by note format then unit) ---
+    let usdt_before_cancel = federation.usdt_balance().await?.0;
+    let usdt_note_3 = federation
+        .usdt_generate_ecash(usdt_send, false, FrontendMetadata::default())
+        .await?;
+    let usdt_after_cancel_send = federation.usdt_balance().await?.0;
+    ensure!(
+        usdt_after_cancel_send < usdt_before_cancel,
+        "USDT send before cancel must reduce the balance"
+    );
+    federation
+        .cancel_ecash(usdt_note_3.ecash.clone())
+        .await
+        .context("cancel_ecash of a USDT note failed")?;
+    poll_until(Duration::from_secs(60), Duration::from_secs(1), || async {
+        Ok(federation.usdt_balance().await?.0 > usdt_after_cancel_send)
+    })
+    .await
+    .context("cancelling the USDT note never restored USDT balance")?;
+    let usdt_after_cancel = federation.usdt_balance().await?.0;
+    ensure!(
+        usdt_after_cancel >= usdt_before_cancel,
+        "cancel must restore the USDT balance ({usdt_after_cancel} < {usdt_before_cancel})"
+    );
+    ensure!(
+        federation.get_balance().await == btc_baseline,
+        "cancelling a USDT note must not change the Bitcoin balance"
+    );
+
+    info!("mixed btc+usdt e2e (shape d) complete: BTC in mintv1, USDT in mintv2, routed by note");
     Ok(())
+}
+
+/// Retry a devimint op whose transport is flaky under full devfed load
+/// (e.g. bitcoind wallet RPCs stalling past devimint's fixed 45s client
+/// timeout, surfacing as "Couldn't connect to host: Resource temporarily
+/// unavailable").
+async fn retry_flaky<F, Fut, T>(what: &str, tries: usize, mut op: F) -> anyhow::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = anyhow::Result<T>>,
+{
+    let mut attempt = 0;
+    loop {
+        match op().await {
+            Ok(value) => return Ok(value),
+            Err(err) => {
+                attempt += 1;
+                if attempt >= tries {
+                    return Err(err.context(format!("{what} failed after {attempt} attempts")));
+                }
+                tracing::warn!(what, attempt, err = format!("{err:#}"), "retrying flaky op");
+                fedimint_core::task::sleep(Duration::from_secs(5)).await;
+            }
+        }
+    }
 }
 
 async fn poll_until<F, Fut>(

@@ -74,7 +74,6 @@ use fedimint_meta_client::MetaModuleMetaSourceWithFallback;
 use fedimint_mint_client::api::MintFederationApi;
 use fedimint_mint_client::config::MintClientConfig;
 use fedimint_mint_client::{MintClientInit, MintClientModule};
-use fedimint_mintv2_client::MintClientModule as MintV2ClientModule;
 use fedimint_usdt_common::EvmAddress;
 use fedimint_wallet_client::{DepositStateV2, PegOutFees, WalletClientInit};
 use fedimint_walletv2_client::WalletClientModule as WalletV2ClientModule;
@@ -144,7 +143,7 @@ use self::db::{
 };
 use self::ln_gateway_service::LnGatewayService;
 use self::ln_ops::LnOpsRouter;
-use self::mint_ops::{MintOpsV1, MintOpsV2};
+use self::mint_ops::MintOpsRouter;
 use self::stability_pool_sweeper_service::StabilityPoolSweeperService;
 use self::wallet_ops::WalletOpsV1;
 use super::federations_locker::FederationLockGuard;
@@ -479,19 +478,15 @@ impl FederationV2 {
         // one router.
         let ln_ops: Box<dyn ln_ops::LnOps> = Box::new(LnOpsRouter);
         let client_config = client.config().await;
-        let has_mintv2 = client_config
-            .modules
-            .values()
-            .any(|config| config.is_kind(&MintV2ClientModule::kind()));
         let has_walletv2 = client_config
             .modules
             .values()
             .any(|config| config.is_kind(&WalletV2ClientModule::kind()));
-        let mint_ops: Box<dyn mint_ops::MintOps> = if has_mintv2 {
-            Box::new(MintOpsV2)
-        } else {
-            Box::new(MintOpsV1)
-        };
+        // Mint routing is per-op, not all-or-nothing: a federation can carry
+        // both mintv1 (Bitcoin) and a usdt-module mintv2 (USDT), and each mint
+        // op must reach the instance that actually holds the relevant money.
+        // The router owns that dispatch (see MintOpsRouter).
+        let mint_ops: Box<dyn mint_ops::MintOps> = Box::new(MintOpsRouter);
         let wallet_ops: Box<dyn wallet_ops::WalletOps> = if has_walletv2 {
             Box::new(WalletOpsV2)
         } else {
