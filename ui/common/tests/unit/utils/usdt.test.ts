@@ -277,5 +277,16 @@ describe('usdt utils', () => {
                 parseUsdtRecipientInput('ethereum:0x1234?amount=1.5'),
             ).toBeNull()
         })
+
+        it('returns null on a malformed amount percent-encoding instead of throwing', () => {
+            // `%` is invalid percent-encoding — `decodeURIComponent` throws.
+            // The whole URI is malformed, so reject it rather than crash.
+            expect(() =>
+                parseUsdtRecipientInput(`ethereum:${address}?amount=%`),
+            ).not.toThrow()
+            expect(
+                parseUsdtRecipientInput(`ethereum:${address}?amount=%`),
+            ).toBeNull()
+        })
     })
 })

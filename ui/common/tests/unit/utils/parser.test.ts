@@ -298,6 +298,26 @@ describe('parseUserInput', () => {
         },
     })
 
+    // --- EVM address (USDT recipient) ---
+
+    const evmAddress = '0x' + '11'.repeat(20)
+
+    testCases.push({
+        input: evmAddress,
+        type: ParserDataType.EvmAddress,
+        data: { address: evmAddress },
+    })
+    testCases.push({
+        input: `ethereum:${evmAddress}`,
+        type: ParserDataType.EvmAddress,
+        data: { address: evmAddress },
+    })
+    testCases.push({
+        input: `ETHEREUM:${evmAddress}@1/transfer`,
+        type: ParserDataType.EvmAddress,
+        data: { address: evmAddress },
+    })
+
     // --- Cashu Ecash ---
 
     testCases.push({
@@ -405,4 +425,31 @@ describe('parseUserInput', () => {
             expect(parsed.type).toEqual(testCase.type)
         }, 2000) // Increase timeout to 2 seconds
     }
+
+    it('extracts the amount param of an ethereum: URI into amountMicros', async () => {
+        const parsed = await parseUserInput(
+            `ethereum:${evmAddress}?amount=5.00`,
+            fedimint,
+            t,
+            mockFedId,
+            false,
+        )
+        expect(parsed.type).toEqual(ParserDataType.EvmAddress)
+        expect(parsed.data).toEqual({
+            address: evmAddress,
+            amountMicros: 5_000_000,
+        })
+    })
+
+    it('does not throw on a malformed ethereum: amount param', async () => {
+        const parsed = await parseUserInput(
+            `ethereum:${evmAddress}?amount=%`,
+            fedimint,
+            t,
+            mockFedId,
+            false,
+        )
+        // Malformed URI — parses as neither EVM nor anything else
+        expect(parsed.type).not.toEqual(ParserDataType.EvmAddress)
+    })
 })

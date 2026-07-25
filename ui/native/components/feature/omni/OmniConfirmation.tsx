@@ -3,6 +3,7 @@ import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Linking } from 'react-native'
 
+import { useIsUsdtSupported } from '@fedi/common/hooks/federation'
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
 import {
@@ -10,6 +11,7 @@ import {
     selectCommunities,
     selectFeatureFlag,
     selectLoadedFederations,
+    selectPaymentFederation,
     setGuardianAssist,
     setLastSelectedCommunityId,
     setPayFromFederationId,
@@ -59,6 +61,10 @@ export const OmniConfirmation = <T extends AnyParsedData>({
     )
     const spTransferFlag = useAppSelector(s =>
         selectFeatureFlag(s, 'sp_transfer_ui'),
+    )
+    const paymentFederation = useAppSelector(selectPaymentFederation)
+    const paymentFederationSupportsUsdt = useIsUsdtSupported(
+        paymentFederation?.id ?? '',
     )
 
     // OmniConfirmation can be rendered ourside of StackNavigator, so `replace`
@@ -371,6 +377,32 @@ export const OmniConfirmation = <T extends AnyParsedData>({
                     continueOnPress: () => {
                         handleNavigate('SendOnChainAmount', {
                             parsedData,
+                        })
+                    },
+                }
+            case ParserDataType.EvmAddress:
+                // Routing a USDT recipient requires a payment federation that
+                // actually has a USDT account to send from.
+                if (!paymentFederationSupportsUsdt) {
+                    return {
+                        contents: {
+                            icon: 'ScanSad',
+                            title: t(
+                                'feature.omni.unsupported-no-usdt-federation',
+                            ),
+                        },
+                    }
+                }
+
+                return {
+                    contents: {
+                        icon: 'Usd',
+                        title: t('feature.omni.confirm-usdt-send'),
+                    },
+                    continueOnPress: () => {
+                        handleNavigate('UsdtSendAmount', {
+                            recipient: parsedData.data.address,
+                            amountMicros: parsedData.data.amountMicros,
                         })
                     },
                 }

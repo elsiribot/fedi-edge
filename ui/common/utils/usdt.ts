@@ -263,8 +263,17 @@ export function parseUsdtRecipientInput(
         for (const param of query.split('&')) {
             const [key, value = ''] = param.split('=')
             if (key.toLowerCase() !== 'amount') continue
+            let decoded: string
+            try {
+                decoded = decodeURIComponent(value)
+            } catch {
+                // Malformed percent-encoding (e.g. a lone `%`) — the URI
+                // itself is invalid, so reject the whole input rather than
+                // throw or silently drop just the amount.
+                return null
+            }
             // Machine format only - URIs never carry locale-formatted amounts
-            const parsed = parseUsdtInput(decodeURIComponent(value))
+            const parsed = parseUsdtInput(decoded)
             if (parsed !== null && parsed > 0) amountMicros = parsed
             break
         }

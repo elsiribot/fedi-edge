@@ -14,6 +14,7 @@ import {
     ParsedCashuEcash,
     ParsedCommunityInvite,
     ParsedDeepLink,
+    ParsedEvmAddress,
     ParsedFederationInvite,
     ParsedFediChatRoom,
     ParsedFediChatUser,
@@ -35,6 +36,7 @@ import { FedimintBridge } from './fedimint'
 import { isDeepLink, normalizeDeepLink } from './linking'
 import { makeLog } from './log'
 import { decodeFediMatrixRoomUri, decodeFediMatrixUserUri } from './matrix'
+import { parseUsdtRecipientInput } from './usdt'
 import { isValidInternetIdentifier } from './validation'
 import {
     decodeLegacyDirectChatLink,
@@ -52,6 +54,7 @@ export const BLOCKED_PARSER_TYPES_BEFORE_FEDERATION = [
     ParserDataType.LnurlAuth,
     ParserDataType.BitcoinAddress,
     ParserDataType.Bip21,
+    ParserDataType.EvmAddress,
     ParserDataType.CashuEcash,
     ParserDataType.FedimintGuardian,
     ParserDataType.FedimintRecovery,
@@ -89,6 +92,10 @@ const offlineParsers: Parser[] = [
     {
         name: 'parseBitcoinAddress',
         handler: raw => parseBitcoinAddress(raw),
+    },
+    {
+        name: 'parseEvmAddress',
+        handler: raw => parseEvmAddress(raw),
     },
     {
         name: 'parseBip21',
@@ -521,6 +528,25 @@ function parseBitcoinAddress(raw: string): ParsedBitcoinAddress | undefined {
             type: ParserDataType.BitcoinAddress,
             data: { address: raw },
         }
+    }
+}
+
+/**
+ * Parse an EVM (0x…) address as a USDT recipient. Handles both bare
+ * `0x…` addresses and `ethereum:` URIs (with optional `@chainId`,
+ * EIP-681 function name and query params). A Fedi-convention
+ * `?amount=<decimal USDT>` param is surfaced as `amountMicros` so a
+ * Fedi-to-Fedi scan can prefill the send amount.
+ */
+function parseEvmAddress(raw: string): ParsedEvmAddress | undefined {
+    const recipient = parseUsdtRecipientInput(raw)
+    if (!recipient) return
+    return {
+        type: ParserDataType.EvmAddress,
+        data: {
+            address: recipient.address,
+            amountMicros: recipient.amountMicros,
+        },
     }
 }
 

@@ -1007,6 +1007,7 @@
             "confirm-receive-ecash": "Redeem ecash token",
             "confirm-send-stability": "Stable Balance Address",
             "confirm-stability-address": "This is a stable balance address, do you want to pay it?",
+            "confirm-usdt-send": "This is a USDT address, do you want to send to it?",
             "confirm-website-url": "This is a website url, do you want to open this in your browser?",
             "error-network-message": "Please retry when you have a connection",
             "error-network-offline-message": "Internet was detected as offline",
@@ -1024,6 +1025,7 @@
             "unsupported-chat-invite": "This is a chat room code. Your username must be invited to a chat room before joining.",
             "unsupported-legacy-chat": "This chat QR is from a version of the app that is no longer supported. Sorry!",
             "unsupported-no-federation": "You can’t use that before joining a federation. Try scanning a federation invite instead.",
+            "unsupported-no-usdt-federation": "Scan this from a wallet that has a USDT account.",
             "unsupported-on-chain": "On-chain bitcoin addresses aren’t supported yet. Sorry!",
             "unsupported-unknown": "Hmm, that's not a format we recognize. Sorry!"
         },

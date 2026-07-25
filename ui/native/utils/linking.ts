@@ -61,6 +61,7 @@ const SUPPORTED_PREFIXES = [
     'lightning:',
     'lnurl:',
     'bitcoin:',
+    'ethereum:',
     'lnurlw://',
     'lnurlp://',
     'keyauth://',

@@ -10,6 +10,7 @@ export enum ParserDataType {
     LnurlAuth = 'lnurl:auth',
     BitcoinAddress = 'bitcoin:address',
     Bip21 = 'bitcoin:bip21',
+    EvmAddress = 'evm:address',
     CashuEcash = 'cashu:ecash',
     DeepLink = 'deeplink',
     FedimintEcash = 'fedimint:ecash',
@@ -94,6 +95,16 @@ export type ParsedBip21 = ParsedData<
         amount?: Btc
         label?: string
         message?: string
+    }
+>
+
+export type ParsedEvmAddress = ParsedData<
+    ParserDataType.EvmAddress,
+    {
+        /** Bare `0x…` recipient (EVM) address */
+        address: string
+        /** Requested amount in USDT micros, from a Fedi `?amount=` param */
+        amountMicros?: number
     }
 >
 
@@ -188,6 +199,7 @@ export type AnyParsedData =
     | ParsedLnurlAuth
     | ParsedBitcoinAddress
     | ParsedBip21
+    | ParsedEvmAddress
     | ParsedCashuEcash
     | ParsedStabilityAddress
     | ParsedDeepLink
