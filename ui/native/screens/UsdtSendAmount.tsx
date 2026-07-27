@@ -198,7 +198,9 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
                                         {t('feature.usdt.network-fee')}
                                     </Text>
                                     <Text caption medium>
-                                        {formatUsdt(feeMicros)}
+                                        {formatUsdt(feeMicros, {
+                                            rounding: 'up',
+                                        })}
                                     </Text>
                                 </Row>
                                 <Row justify="between">

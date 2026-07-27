@@ -9,8 +9,21 @@ import amountUtils from './AmountUtils'
 
 export const USDT_MICROS_PER_USDT = 1_000_000
 
-/** Maximum number of decimal places a USDT amount can have */
+/** Maximum number of decimal places a USDT amount can have (machine/URI precision) */
 export const USDT_DECIMALS = 6
+
+/**
+ * Maximum number of decimal places accepted for *UI entry* (numpad,
+ * typed/pasted amounts in send/receive/chat screens) - the display/entry
+ * precision policy caps everything at cents, even though the machine
+ * format (`USDT_DECIMALS`) preserves full 6-decimal precision for
+ * URIs/wire formats. See `formatUsdtMicros`'s rounding/dust-guard
+ * behavior and `parseUsdtInput`'s `maxDecimals` option.
+ */
+export const USDT_ENTRY_MAX_DECIMALS = 2
+
+/** Number of USDT micros in one cent (10^-2 USDT) */
+const USDT_MICROS_PER_CENT = USDT_MICROS_PER_USDT / 100
 
 /** Escapes a string for safe interpolation into a `RegExp` source. */
 function escapeRegExp(value: string): string {
@@ -68,25 +81,59 @@ function splitUsdtMicros(micros: number): {
  * `AmountUtils`'s other `locale`-less calls) via `Intl.NumberFormat` -
  * exactly like `AmountUtils.toLocaleString`/`getDecimalSeparator` do.
  *
- * Always shows at least 2 decimal places, extending up to 6 decimal places
- * when needed to preserve full precision.
+ * UI precision policy: always shows EXACTLY 2 decimal places (cents),
+ * never more - the underlying value stays integer micros internally
+ * (URIs/wire/bridge formats are unaffected; see `microsToDecimalString`),
+ * but everything a human reads is rounded to cents:
+ *   - `opts.rounding: 'down'` (default) truncates toward zero, so a
+ *     balance/received/sent amount is never overstated.
+ *   - `opts.rounding: 'up'` rounds up to the next cent, for fee/cost
+ *     displays (a fee must never be understated) - pass this only at fee
+ *     call sites, e.g. via `useFormatUsdtMicros()(fee, { rounding: 'up' })`.
+ *   - Dust guard: a non-zero amount that truncates to "0.00" instead
+ *     renders as "<0.01" (locale-formatted 0.01 with a `<` prefix) so
+ *     non-zero money is never shown as if it were exactly zero. This
+ *     can only happen under `rounding: 'down'` - `rounding: 'up'` always
+ *     rounds a non-zero amount up to at least one cent.
  *
  * This is a *display* helper - the string it returns is locale-formatted
  * and must never be embedded in a URI or other machine-readable value.
- * Use `microsToDecimalString` for that.
+ * Use `microsToDecimalString` for that (which keeps full 6-decimal
+ * machine precision, unaffected by this cents-only display policy).
  */
 export function formatUsdtMicros(
     micros: number,
-    { symbol = true, locale }: { symbol?: boolean; locale?: string } = {},
+    {
+        symbol = true,
+        locale,
+        rounding = 'down',
+    }: { symbol?: boolean; locale?: string; rounding?: 'down' | 'up' } = {},
 ): string {
-    const { sign, whole, decimals } = splitUsdtMicros(micros)
+    const sign = micros < 0 ? '-' : ''
+    const absMicros = Math.abs(Math.round(micros))
+
+    // Reduce to whole cents via Math.floor/ceil of an integer micros value
+    // (same effectively-integer-safe division/modulo pattern as
+    // `splitUsdtMicros` - safe for any `Number.isSafeInteger` amount).
+    let cents =
+        rounding === 'up'
+            ? Math.ceil(absMicros / USDT_MICROS_PER_CENT)
+            : Math.floor(absMicros / USDT_MICROS_PER_CENT)
+
+    // Dust guard: a non-zero amount that truncated away to nothing is
+    // displayed as "<0.01" rather than "0.00"
+    const isDust = absMicros > 0 && cents === 0
+    if (isDust) cents = 1
+
+    const whole = Math.floor(cents / 100)
+    const centsStr = String(cents % 100).padStart(2, '0')
 
     // Group the whole part per the locale's convention, e.g. 1234567 ->
     // "1,234,567" (en-US) or "1.234.567" (de-DE)
     const wholeStr = new Intl.NumberFormat(locale).format(whole)
     const decimalSeparator = amountUtils.getDecimalSeparator({ locale })
 
-    return `${sign}${wholeStr}${decimalSeparator}${decimals}${symbol ? ' USDT' : ''}`
+    return `${isDust ? '<' : ''}${sign}${wholeStr}${decimalSeparator}${centsStr}${symbol ? ' USDT' : ''}`
 }
 
 /**
@@ -137,14 +184,27 @@ export function microsToDecimalString(micros: number): string {
  * decimals regardless of locale). No grouping separators are recognized
  * in this mode, and `opts.groupingSeparator` is ignored.
  *
+ * `opts.maxDecimals` caps how many decimal places are accepted (default
+ * `USDT_DECIMALS` = 6, the full machine precision). Pass
+ * `USDT_ENTRY_MAX_DECIMALS` (2) at UI amount-entry call sites so typed/
+ * pasted input is rejected beyond cents, per the cents-precision entry
+ * policy - `parseUsdtRecipientInput`'s URI-amount parsing deliberately
+ * omits this option so scanned `?amount=` values still parse at full
+ * 6-decimal precision.
+ *
  * Returns `null` if the input is not a valid USDT amount (empty,
- * malformed, ambiguous, more than 6 decimal places, or too large to
- * represent safely).
+ * malformed, ambiguous, more than `opts.maxDecimals` decimal places, or
+ * too large to represent safely).
  */
 export function parseUsdtInput(
     input: string,
-    opts: { decimalSeparator?: string; groupingSeparator?: string } = {},
+    opts: {
+        decimalSeparator?: string
+        groupingSeparator?: string
+        maxDecimals?: number
+    } = {},
 ): number | null {
+    const maxDecimals = opts.maxDecimals ?? USDT_DECIMALS
     // Strip surrounding whitespace and a trailing currency symbol/suffix
     let trimmed = input
         .trim()
@@ -199,7 +259,9 @@ export function parseUsdtInput(
     // Tolerate (and drop) a trailing decimal separator, e.g. "5." -> "5"
     trimmed = trimmed.replace(/\.$/, '')
 
-    const match = trimmed.match(/^(\d+)?(?:\.(\d{1,6}))?$/)
+    const match = trimmed.match(
+        new RegExp(`^(\\d+)?(?:\\.(\\d{1,${maxDecimals}}))?$`),
+    )
     if (!match || (!match[1] && !match[2])) return null
 
     const whole = parseInt(match[1] || '0', 10)

@@ -428,11 +428,15 @@ describe('makeMatrixPaymentText USDT amount verification', () => {
             verifiedAmountMicros: 1,
         })
 
-        expect(formatUsdtMicros(1)).toBe('0.000001 USDT')
+        // 1 micro truncates to 0.00 at the cents display policy, so the
+        // dust guard renders it as "<0.01" rather than "0.00" - the
+        // anti-spoof property under test is that this is still nowhere
+        // near the sender-declared 1,000.00 USDT
+        expect(formatUsdtMicros(1)).toBe('<0.01 USDT')
 
         expect(t).toHaveBeenCalledWith(
             'feature.usdt.they-sent-payment',
-            expect.objectContaining({ amount: '0.000001 USDT' }),
+            expect.objectContaining({ amount: '<0.01 USDT' }),
         )
         // must NOT render the sender-declared amount
         expect(t).not.toHaveBeenCalledWith(

@@ -9,7 +9,7 @@ import {
 
 import { useUsdtDecimalSeparator } from '@fedi/common/hooks/usdt'
 import { NumpadButtonValue, numpadButtons } from '@fedi/common/types/amount'
-import { USDT_DECIMALS } from '@fedi/common/utils/usdt'
+import { USDT_ENTRY_MAX_DECIMALS } from '@fedi/common/utils/usdt'
 
 import { useForceBlurOnKeyboardHide } from '../../utils/hooks/keyboard'
 import { Column } from './Flex'
@@ -65,10 +65,11 @@ const UsdtAmountInput: React.FC<Props> = ({
 
     // Fallback for small screens where the numpad is hidden and the OS
     // keyboard is used instead: keep only digits and one decimal
-    // separator, clamped to the supported precision. Hardware/soft
-    // keyboards may emit either '.' or ',' regardless of locale, so both
-    // are normalized to the active locale separator (mirrors
-    // useAmountInput's numpad handling).
+    // separator, clamped to the supported precision (UI entry policy:
+    // cents, i.e. `USDT_ENTRY_MAX_DECIMALS`). Hardware/soft keyboards may
+    // emit either '.' or ',' regardless of locale, so both are normalized
+    // to the active locale separator (mirrors useAmountInput's numpad
+    // handling).
     const handleChangeText = (value: string) => {
         const cleaned = value
             .replace(/[.,]/g, decimalSeparator)
@@ -85,7 +86,7 @@ const UsdtAmountInput: React.FC<Props> = ({
             .slice(firstSep + 1)
             .split(decimalSeparator)
             .join('')
-            .slice(0, USDT_DECIMALS)
+            .slice(0, USDT_ENTRY_MAX_DECIMALS)
         onChangeAmountInput(`${whole}${decimalSeparator}${fraction}`)
     }
 
@@ -109,7 +110,8 @@ const UsdtAmountInput: React.FC<Props> = ({
         const next =
             amountInput === '0' ? String(btn) : amountInput + String(btn)
         const [whole = '', fraction = ''] = next.split(decimalSeparator)
-        if (fraction.length > USDT_DECIMALS) return true
+        // Ignore a 3rd decimal digit - UI entry is capped at cents
+        if (fraction.length > USDT_ENTRY_MAX_DECIMALS) return true
         if (whole.length > MAX_WHOLE_DIGITS) return true
         onChangeAmountInput(next)
         return false

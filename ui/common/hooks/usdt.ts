@@ -13,6 +13,8 @@ import {
     formatUsdtMicros,
     microsToDecimalString,
     parseUsdtInput,
+    USDT_ENTRY_MAX_DECIMALS,
+    USDT_MICROS_PER_USDT,
 } from '../utils/usdt'
 import { useIsUsdtSupported } from './federation'
 import { useFedimint } from './fedimint'
@@ -56,10 +58,26 @@ export const useUsdtGroupingSeparator = (): string => {
 export const useFormatUsdtMicros = () => {
     const currencyLocale = useCommonSelector(selectCurrencyLocale)
     return useCallback(
-        (micros: number, opts: { symbol?: boolean } = {}) =>
-            formatUsdtMicros(micros, { ...opts, locale: currencyLocale }),
+        (
+            micros: number,
+            opts: { symbol?: boolean; rounding?: 'down' | 'up' } = {},
+        ) => formatUsdtMicros(micros, { ...opts, locale: currencyLocale }),
         [currencyLocale],
     )
+}
+
+/**
+ * Truncates a USDT micros amount down to whole cents (toward zero), for
+ * seeding/reseeding an amount-entry field from a machine-precision source
+ * (e.g. a scanned `ethereum:…?amount=` URI parsed at full 6-decimal
+ * precision by `parseUsdtRecipientInput`). The UI entry policy caps
+ * amounts at cents, so any sub-cent remainder is dropped here rather than
+ * shown - the sender then never sends more than was actually scanned,
+ * only (at most) a sub-cent shortfall versus the requested amount.
+ */
+function truncateMicrosToCents(micros: number): number {
+    const microsPerCent = USDT_MICROS_PER_USDT / 100
+    return Math.trunc(micros / microsPerCent) * microsPerCent
 }
 
 /**
@@ -85,24 +103,24 @@ export const useUsdtAmountInput = (opts?: {
 
     const [amountInput, setAmountInput] = useState(() =>
         opts?.initialMicros
-            ? microsToDecimalString(opts.initialMicros).replace(
-                  '.',
-                  decimalSeparator,
-              )
+            ? microsToDecimalString(
+                  truncateMicrosToCents(opts.initialMicros),
+              ).replace('.', decimalSeparator)
             : '',
     )
 
     // Reseed the field from a micros amount (e.g. re-entering a previously
-    // requested amount), applying the same locale-aware formatting the
-    // `initialMicros` prefill uses. Falsy/zero clears the field.
+    // requested amount, or a scanned `?amount=` prefill), applying the same
+    // locale-aware formatting the `initialMicros` prefill uses. Truncates to
+    // cents per the UI entry precision policy - see `truncateMicrosToCents`.
+    // Falsy/zero clears the field.
     const setAmountFromMicros = useCallback(
         (micros: number | null) =>
             setAmountInput(
                 micros
-                    ? microsToDecimalString(micros).replace(
-                          '.',
-                          decimalSeparator,
-                      )
+                    ? microsToDecimalString(
+                          truncateMicrosToCents(micros),
+                      ).replace('.', decimalSeparator)
                     : '',
             ),
         [decimalSeparator],
@@ -111,10 +129,13 @@ export const useUsdtAmountInput = (opts?: {
     const balanceMicros = opts?.balanceMicros ?? 0
 
     // `parseUsdtInput` tolerates a transient trailing decimal separator
-    // mid-entry, e.g. "5."
+    // mid-entry, e.g. "5." - `maxDecimals` caps UI entry at cents, so a 3rd
+    // typed/pasted decimal digit is rejected (null) rather than truncated
+    // silently.
     const amountMicros = parseUsdtInput(amountInput, {
         decimalSeparator,
         groupingSeparator,
+        maxDecimals: USDT_ENTRY_MAX_DECIMALS,
     })
     const isPositiveAmount = amountMicros !== null && amountMicros > 0
     const hasInsufficientBalance =

@@ -24,10 +24,33 @@ describe('usdt utils', () => {
             expect(formatUsdtMicros(100_000)).toBe('0.10 USDT')
         })
 
-        it('keeps full 6-decimal precision when needed', () => {
-            expect(formatUsdtMicros(1)).toBe('0.000001 USDT')
-            expect(formatUsdtMicros(1_234_567)).toBe('1.234567 USDT')
-            expect(formatUsdtMicros(1_234_500)).toBe('1.2345 USDT')
+        it('truncates (rounds down) beyond 2 decimal places by default', () => {
+            // 2.000384 USDT -> "2.00 USDT", never overstating the amount
+            expect(formatUsdtMicros(2_000_384)).toBe('2.00 USDT')
+            expect(formatUsdtMicros(1_234_567)).toBe('1.23 USDT')
+            expect(formatUsdtMicros(1_234_500)).toBe('1.23 USDT')
+        })
+
+        it('renders a non-zero amount that truncates to 0.00 as "<0.01" (dust guard)', () => {
+            expect(formatUsdtMicros(1)).toBe('<0.01 USDT')
+            expect(formatUsdtMicros(9_999)).toBe('<0.01 USDT')
+        })
+
+        it('renders an exact zero amount as "0.00", with no dust prefix', () => {
+            expect(formatUsdtMicros(0)).toBe('0.00 USDT')
+        })
+
+        it('rounds up when opts.rounding is "up" (for fee/cost displays)', () => {
+            // 0.047497 USDT fee -> "0.05 USDT", never understating a cost
+            expect(formatUsdtMicros(47_497, { rounding: 'up' })).toBe(
+                '0.05 USDT',
+            )
+            // already exact at 2dp - rounding up doesn't change it
+            expect(formatUsdtMicros(1_230_000, { rounding: 'up' })).toBe(
+                '1.23 USDT',
+            )
+            // zero stays zero even when rounding up
+            expect(formatUsdtMicros(0, { rounding: 'up' })).toBe('0.00 USDT')
         })
 
         it('groups large whole amounts with commas', () => {
@@ -90,6 +113,21 @@ describe('usdt utils', () => {
             expect(parseUsdtInput('-1')).toBeNull()
             expect(parseUsdtInput('1.2345678')).toBeNull()
             expect(parseUsdtInput('1,000.5')).toBeNull()
+        })
+    })
+
+    describe('parseUsdtInput with opts.maxDecimals (UI entry cap)', () => {
+        it('accepts up to maxDecimals decimal places', () => {
+            expect(parseUsdtInput('1.23', { maxDecimals: 2 })).toBe(1_230_000)
+            expect(parseUsdtInput('1', { maxDecimals: 2 })).toBe(1_000_000)
+        })
+
+        it('rejects more than maxDecimals decimal places', () => {
+            expect(parseUsdtInput('1.234', { maxDecimals: 2 })).toBeNull()
+        })
+
+        it('still accepts up to 6 decimals when maxDecimals is omitted (machine default)', () => {
+            expect(parseUsdtInput('1.234567')).toBe(1_234_567)
         })
     })
 
