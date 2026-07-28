@@ -13,6 +13,7 @@ import {
 import { MSats } from '@fedi/common/types'
 import amountUtils from '@fedi/common/utils/AmountUtils'
 import { makeLog } from '@fedi/common/utils/log'
+import { encodeEcashToBuffer } from '@fedi/common/utils/qr'
 
 import { Button } from '../../components/Button'
 import { Checkbox } from '../../components/Checkbox'
@@ -87,7 +88,7 @@ export const PaperEcashForm: React.FC<Props> = ({ onChangeEcashPapers }) => {
                     includeInvite,
                 )
                 const frames = dataToFrames(
-                    isOptimizedQr ? Buffer.from(ecash, 'base64') : ecash,
+                    isOptimizedQr ? encodeEcashToBuffer(ecash) : ecash,
                 )
                 ecashPapers.push({ ecash, frames, amount })
             }

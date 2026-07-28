@@ -1,11 +1,11 @@
 import { Button, Text, Theme, useTheme } from '@rneui/themed'
-import { Buffer } from 'buffer'
 import { dataToFrames } from 'qrloop'
 import React, { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Alert, Pressable, StyleSheet } from 'react-native'
 
 import { selectIsInternetUnreachable } from '@fedi/common/redux'
+import { encodeEcashToBuffer } from '@fedi/common/utils/qr'
 
 import { useAppSelector } from '../../../state/hooks'
 import { Column, Row } from '../../ui/Flex'
@@ -15,7 +15,7 @@ import { SafeScrollArea } from '../../ui/SafeArea'
 import SvgImage from '../../ui/SvgImage'
 
 type Props = {
-    /** The base64 ecash token, rendered as an animated QR and copied on tap */
+    /** The ecash token (v1 base64 or v2 `fedimint…`), rendered as an animated QR and copied on tap */
     ecash: string
     /** Formatted primary (h1) amount, e.g. "0.001 BTC" or "$1.50" */
     formattedPrimaryAmount: string
@@ -55,7 +55,7 @@ const OfflineQrScreen: React.FC<Props> = ({
     const isOffline = useAppSelector(selectIsInternetUnreachable)
 
     const frames = useMemo(() => {
-        return dataToFrames(Buffer.from(ecash, 'base64'))
+        return dataToFrames(encodeEcashToBuffer(ecash))
     }, [ecash])
 
     // show new qr every 100ms
