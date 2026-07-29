@@ -230,7 +230,11 @@ impl FederationV2 {
     /// before a restore, followed by a claim pass.
     pub async fn usdt_recover_deposits(&self) -> Result<u32> {
         let usdt = self.client.usdt()?;
-        let summary = usdt.recover_deposits(20).await?;
+        // `check_uncredited: true`: also re-arm the guardians' deposit
+        // checker for rediscovered addresses that show no credit yet, so a
+        // transfer the federation never observed (e.g. it happened while no
+        // guardian was watching) gets credited after the restore.
+        let summary = usdt.recover_deposits(20, true).await?;
         info!(?summary, "usdt deposit recovery finished");
         self.usdt_check_deposits().await
     }
@@ -238,6 +242,11 @@ impl FederationV2 {
     /// Quote for the on-chain fee of withdrawing `amount` right now, in
     /// 10^-6 USDT units. The fee is deducted from the withdrawn amount by
     /// the federation.
+    ///
+    /// Errors (surfaced to the frontend as a plain RpcError) when the
+    /// federation has no usable fee quote yet (no fresh fee-vote median);
+    /// the client module bails instead of returning a `0` placeholder that
+    /// a subsequent withdraw would be rejected against.
     pub async fn usdt_withdraw_fee_quote(&self, amount: RpcUsdtAmount) -> Result<RpcUsdtAmount> {
         let usdt = self.client.usdt()?;
         let quote = usdt.withdraw_fee_quote(UsdtAmount(amount.0)).await?;
@@ -629,7 +638,16 @@ impl FederationV2 {
         if status.claimable.0 == 0 {
             return Ok(false);
         }
-        let result = usdt.claim(claim_pk).await?;
+        // `(None, false)`: no explicit fee ceiling, and do NOT bypass the
+        // client's default fee-sanity guard, which refuses to claim while
+        // the federation's deposit fee quote eats more than a sanity
+        // percentage of the claimable amount. A refusal surfaces as an
+        // `Err` here BEFORE any e-cash is minted; our callers only `warn!`
+        // and never emit a user-facing Failed event, and the deposit
+        // service simply retries on its normal cadence (15s hot poll /
+        // 10min full scan), so a fee-spiked deposit is claimed later at a
+        // sane fee instead of silently overpaying now.
+        let result = usdt.claim(claim_pk, None, false).await?;
         // The e-cash actually issued is claimed - fee; report net so the
         // event amount matches history and the balance delta.
         let net = UsdtAmount(result.claimed.0.saturating_sub(result.fee.0));
