@@ -187,7 +187,15 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
     let fee_quote = federation
         .usdt_withdraw_fee_quote(RpcUsdtAmount(MIN_NET_DEPOSIT))
         .await?;
-    let transfer_amount = UsdtAmount(MIN_NET_DEPOSIT + fee_quote.0 * 6);
+    // `* 24`, not a minimal margin: since the v0.11.0-fedi7-usdt.2 client,
+    // `claim` refuses (and the deposit service retries forever) while the
+    // DEPOSIT fee quote exceeds 25% of the claimable amount, and the deposit
+    // quote runs well above this WITHDRAW quote (first sweep pays
+    // `needs_deploy` gas). `* 6` sized the deposit right at that 25%
+    // boundary on the anvil devnet (observed: quote 3.94 USDT vs a 15.74
+    // USDT deposit) and the claim never happened; the extra headroom keeps
+    // the fee comfortably inside the sanity guard.
+    let transfer_amount = UsdtAmount(MIN_NET_DEPOSIT + fee_quote.0 * 24);
 
     info!(%address, amount = transfer_amount.0, "sending on-chain USDT to the deposit address");
     let deposit_address: EvmAddress = address.parse()?;
@@ -654,7 +662,15 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
     let fee_quote = federation
         .usdt_withdraw_fee_quote(RpcUsdtAmount(MIN_NET_DEPOSIT))
         .await?;
-    let transfer_amount = UsdtAmount(MIN_NET_DEPOSIT + fee_quote.0 * 6);
+    // `* 24`, not a minimal margin: since the v0.11.0-fedi7-usdt.2 client,
+    // `claim` refuses (and the deposit service retries forever) while the
+    // DEPOSIT fee quote exceeds 25% of the claimable amount, and the deposit
+    // quote runs well above this WITHDRAW quote (first sweep pays
+    // `needs_deploy` gas). `* 6` sized the deposit right at that 25%
+    // boundary on the anvil devnet (observed: quote 3.94 USDT vs a 15.74
+    // USDT deposit) and the claim never happened; the extra headroom keeps
+    // the fee comfortably inside the sanity guard.
+    let transfer_amount = UsdtAmount(MIN_NET_DEPOSIT + fee_quote.0 * 24);
     let deposit_address: EvmAddress = address.parse()?;
     info!(%address, amount = transfer_amount.0, "sending on-chain USDT to the deposit address");
     transfer_erc20_from_account_1(&anvil, token, deposit_address, transfer_amount).await?;
