@@ -2,7 +2,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import { Button, Text, Theme, useTheme } from '@rneui/themed'
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { StyleSheet } from 'react-native'
+import { Alert, StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
@@ -56,7 +56,7 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
     } = useUsdtAmountInput({ balanceMicros })
     const [isGenerating, setIsGenerating] = useState(false)
 
-    const handleNext = async () => {
+    const handleGenerate = async () => {
         if (
             !federationId ||
             !isAmountValid ||
@@ -86,6 +86,25 @@ const UsdtSendOfflineAmount: React.FC<Props> = ({ navigation }) => {
         } finally {
             setIsGenerating(false)
         }
+    }
+
+    // Same warning the BTC offline send shows (ConfirmSendEcash): once the
+    // notes are generated they leave the balance until claimed or cancelled
+    const handleNext = () => {
+        if (!isAmountValid || amountMicros === null || isGenerating) return
+        Alert.alert(
+            t('phrases.please-confirm'),
+            t('feature.send.offline-send-warning'),
+            [
+                {
+                    text: t('phrases.go-back'),
+                },
+                {
+                    text: t('words.continue'),
+                    onPress: handleGenerate,
+                },
+            ],
+        )
     }
 
     const style = styles(theme)
