@@ -419,6 +419,12 @@ pub struct FederationV2 {
     // claim or expiry. The USDT deposit service polls the hot address at a
     // fast cadence (and wakes immediately on changes to this watch channel).
     pub usdt_deposit_hint: tokio::sync::watch::Sender<Option<(EvmAddress, SystemTime)>>,
+    // Test/debug override for the EVM JSON-RPC endpoint the USDT deposit
+    // service fetches `eth_getProof` deposit proofs from. Checked before the
+    // `usdt:evm_rpc_url` federation meta key and the client module's built-in
+    // mainnet defaults (see `usdt_evm_rpc_urls`). Set via
+    // `usdt_set_evm_rpc_url_override` (the e2e points it at its anvil).
+    pub usdt_evm_rpc_override: std::sync::Mutex<Option<String>>,
     pub this_weak: Weak<Self>,
     pub guard: FederationLockGuard,
     // Stability pool v2 services for syncing accout history between client and server
@@ -519,6 +525,7 @@ impl FederationV2 {
             generate_ecash_lock: Default::default(),
             usdt_claim_guard: Default::default(),
             usdt_deposit_hint: tokio::sync::watch::Sender::new(None),
+            usdt_evm_rpc_override: Default::default(),
             this_weak: weak.clone(),
             guard,
             multispend_services,

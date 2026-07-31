@@ -15,7 +15,7 @@ use fedimint_client::db::ChronologicalOperationLogKey;
 use fedimint_core::base32::{FEDIMINT_PREFIX, decode_prefixed};
 use fedimint_core::core::OperationId;
 use fedimint_core::db::IDatabaseTransactionOpsCoreTyped;
-use fedimint_core::secp256k1::PublicKey;
+use fedimint_core::secp256k1::{Keypair, PublicKey};
 use fedimint_core::task::sleep;
 use fedimint_core::{OutPoint, TransactionId};
 use fedimint_mintv2_client::{
@@ -24,6 +24,7 @@ use fedimint_mintv2_client::{
 };
 use fedimint_usdt_client::UsdtOperationMeta;
 use fedimint_usdt_client::db::{ClaimKeyKey, ClaimKeyPrefixAll};
+use fedimint_usdt_client::evm::{DEFAULT_EVM_RPC_URLS, EthJsonRpc};
 use fedimint_usdt_common::{BootstrapState, EvmAddress, USDT_UNIT, UsdtAmount, WithdrawalStatus};
 use futures::StreamExt;
 use rpc_types::error::ErrorCode;
@@ -39,7 +40,7 @@ use rpc_types::{
     RpcEcashUnit,
 };
 use runtime::utils::to_unix_time;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::FederationV2;
 use super::client::ClientExt as _;
@@ -56,12 +57,22 @@ const DEPOSIT_WATCH_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
 pub const USDT_HOT_POLL_INTERVAL: Duration = Duration::from_secs(15);
 
 /// Cadence of the USDT deposit service's full pass over ALL known deposit
-/// addresses (re-arm the guardians' deposit checker + claim anything
-/// claimable). Catches late deposits to old addresses.
+/// addresses (attempt a deposit-proof submission for each + drain any legacy
+/// observation-model `claimable` balance). Catches late deposits to old
+/// addresses.
 pub const USDT_FULL_SCAN_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// How long we poll a submitted withdrawal for on-chain confirmation.
 const WITHDRAWAL_WATCH_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Federation meta key a federation operator can set to point clients at a
+/// specific EVM JSON-RPC endpoint for deposit-proof fetching (the
+/// `eth_getProof` and `eth_getBlockByNumber` calls of [`EthJsonRpc`]) --
+/// operator-controlled without an app update. The value is the plain URL
+/// string (an optional surrounding pair of JSON double quotes is tolerated).
+/// Absent or empty means the client module's built-in keyless mainnet
+/// default list ([`DEFAULT_EVM_RPC_URLS`]) is used.
+pub const USDT_EVM_RPC_URL_META_KEY: &str = "usdt:evm_rpc_url";
 
 impl FederationV2 {
     /// Whether the joined federation runs the usdt module.
@@ -192,11 +203,17 @@ impl FederationV2 {
         Ok(deposits)
     }
 
-    /// One pass over all known deposit addresses: re-arms the guardians'
-    /// deposit checker for each (server-side watching is one-shot per
-    /// `check_deposit` call, so later deposits to a known address are only
-    /// observed if we keep re-arming) and claims anything claimable right
-    /// now. Returns the number of deposits claimed.
+    /// One pass over all known deposit addresses under the deposit-by-proof
+    /// model (guardians no longer watch deposit addresses; crediting happens
+    /// ONLY when this client submits an `eth_getProof` balance proof):
+    /// - attempts a deposit-proof submission for each address (fetch the proof
+    ///   at the federation's newest anchored block, submit if it proves
+    ///   anything new -- credit + mint atomic, no deposit fee);
+    /// - drains any LEGACY observation-model balance (`claimable > 0`, credited
+    ///   by guardians before the proof model) via the old `claim` path, fee
+    ///   guard intact.
+    ///
+    /// Returns the number of deposits credited/claimed.
     pub async fn usdt_check_deposits(&self) -> Result<u32> {
         let usdt = self.client.usdt()?;
         let keypairs: Vec<_> = usdt
@@ -212,9 +229,16 @@ impl FederationV2 {
         let mut claimed = 0u32;
         for (ClaimKeyKey(address), keypair) in keypairs {
             let claim_pk = keypair.public_key();
-            if let Err(err) = usdt.check_deposit(claim_pk).await {
-                warn!(%address, ?err, "failed to re-arm usdt deposit check");
+            match self.usdt_try_submit_deposit_proof(address, &keypair).await {
+                Ok(true) => claimed += 1,
+                Ok(false) => {}
+                Err(err) => {
+                    warn!(%address, ?err, "usdt deposit-proof submission failed, will retry");
+                }
             }
+            // Legacy drain: balances credited by guardians under the
+            // pre-proof observation model stay claimable through the old
+            // (fee-charging) claim path until drained.
             match self.usdt_claim_if_claimable(address, claim_pk).await {
                 Ok(true) => claimed += 1,
                 Ok(false) => {}
@@ -230,10 +254,11 @@ impl FederationV2 {
     /// before a restore, followed by a claim pass.
     pub async fn usdt_recover_deposits(&self) -> Result<u32> {
         let usdt = self.client.usdt()?;
-        // `check_uncredited: true`: also re-arm the guardians' deposit
-        // checker for rediscovered addresses that show no credit yet, so a
-        // transfer the federation never observed (e.g. it happened while no
-        // guardian was watching) gets credited after the restore.
+        // `check_uncredited: true`: also persist the claim keys of scanned
+        // addresses that show no credit yet, so a transfer the federation
+        // never credited (crediting is proof-driven and this seed's previous
+        // device may never have submitted one) is picked up by the
+        // `usdt_check_deposits` proof pass below.
         let summary = usdt.recover_deposits(20, true).await?;
         info!(?summary, "usdt deposit recovery finished");
         self.usdt_check_deposits().await
@@ -544,10 +569,22 @@ impl FederationV2 {
     ///   [`USDT_FULL_SCAN_INTERVAL`] (the first pass runs immediately, claiming
     ///   deposits that landed while the app was closed).
     ///
-    /// Each poll re-arms the guardians' deposit checker (`check_deposit` is
-    /// idempotent server-side), reads `deposit_status` and claims if
-    /// claimable.
+    /// Each poll fetches an `eth_getProof` balance proof of the address at
+    /// the federation's newest anchored block and submits it when it proves
+    /// anything new (deposit-by-proof: credit + mint atomic, no deposit fee),
+    /// plus drains any legacy observation-model `claimable` balance through
+    /// the old claim path.
     async fn run_usdt_deposit_service(&self) {
+        // Mirror an operator-configured EVM RPC URL (federation meta) into
+        // the client module's own persisted override, so any client-internal
+        // URL resolution (`submit_deposit_proof`'s default path) agrees with
+        // the bridge-side resolution in `usdt_evm_rpc_urls`.
+        if let Ok(usdt) = self.client.usdt()
+            && let Some(url) = self.usdt_meta_evm_rpc_url().await
+        {
+            usdt.set_evm_rpc_url(Some(url)).await;
+        }
+
         let mut hint_rx = self.usdt_deposit_hint.subscribe();
         let mut next_full_scan = fedimint_core::time::now();
         loop {
@@ -600,8 +637,10 @@ impl FederationV2 {
         }
     }
 
-    /// One fast-cadence poll of the hot deposit address: re-arm the
-    /// guardians' deposit checker, then claim if claimable.
+    /// One fast-cadence poll of the hot deposit address: attempt a
+    /// deposit-proof submission, then drain any legacy observation-model
+    /// `claimable` balance (a pre-upgrade current address may still carry
+    /// one).
     async fn usdt_poll_hot_deposit(&self, address: EvmAddress) -> Result<()> {
         let usdt = self.client.usdt()?;
         let keypair = usdt
@@ -613,9 +652,148 @@ impl FederationV2 {
             .await
             .ok_or_else(|| anyhow!("unknown deposit address {address}"))?;
         let claim_pk = keypair.public_key();
-        usdt.check_deposit(claim_pk).await?;
+        self.usdt_try_submit_deposit_proof(address, &keypair)
+            .await?;
         self.usdt_claim_if_claimable(address, claim_pk).await?;
         Ok(())
+    }
+
+    /// Reads the operator-configured EVM RPC URL from federation meta
+    /// ([`USDT_EVM_RPC_URL_META_KEY`]), `None` when unset/empty.
+    async fn usdt_meta_evm_rpc_url(&self) -> Option<String> {
+        let meta = self.get_cached_meta().await;
+        let url = meta.get(USDT_EVM_RPC_URL_META_KEY)?.trim();
+        // Tolerate a JSON-quoted value (fedimint meta values are raw strings,
+        // but operators sometimes paste them JSON-encoded).
+        let url = url
+            .strip_prefix('"')
+            .and_then(|u| u.strip_suffix('"'))
+            .unwrap_or(url)
+            .trim();
+        if url.is_empty() {
+            return None;
+        }
+        Some(url.to_string())
+    }
+
+    /// Resolves the EVM JSON-RPC endpoint list the deposit service fetches
+    /// deposit proofs from, in precedence order: the in-memory test/debug
+    /// override (`usdt_set_evm_rpc_url_override`), then the
+    /// [`USDT_EVM_RPC_URL_META_KEY`] federation meta key (operator-controlled
+    /// without an app update), then the client module's built-in keyless
+    /// mainnet defaults ([`DEFAULT_EVM_RPC_URLS`], tried in order with the
+    /// client's per-call timeout cap).
+    async fn usdt_evm_rpc_urls(&self) -> Vec<String> {
+        if let Some(url) = self
+            .usdt_evm_rpc_override
+            .lock()
+            .expect("usdt evm rpc override mutex poisoned")
+            .clone()
+        {
+            return vec![url];
+        }
+        if let Some(url) = self.usdt_meta_evm_rpc_url().await {
+            return vec![url];
+        }
+        DEFAULT_EVM_RPC_URLS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect()
+    }
+
+    /// Sets (or clears, with `None`) the in-memory EVM RPC endpoint override
+    /// consulted first by [`Self::usdt_evm_rpc_urls`]. Test/debug hook -- the
+    /// e2e points the deposit service at its anvil devnet with this; real
+    /// deployments use the [`USDT_EVM_RPC_URL_META_KEY`] federation meta key
+    /// instead.
+    pub fn usdt_set_evm_rpc_url_override(&self, url: Option<String>) {
+        *self
+            .usdt_evm_rpc_override
+            .lock()
+            .expect("usdt evm rpc override mutex poisoned") = url;
+    }
+
+    /// Attempts to credit `address`'s on-chain USDT balance by fetching an
+    /// `eth_getProof` balance proof at the federation's newest anchored block
+    /// and submitting it (deposit-by-proof: credit + mint atomic, NO deposit
+    /// fee). Runs under the federation-wide `usdt_claim_guard` so concurrent
+    /// submitters (the deposit service and the
+    /// `usdtCheckDeposits`/`usdtRecoverDeposits` paths) can't race each other
+    /// into rejected transactions.
+    ///
+    /// The proof fetch doubles as the pre-check: an empty, never-credited
+    /// account (`proven == 0 && credited == 0` -- the common
+    /// no-deposit-yet case for a hot address) submits nothing. Anything else
+    /// is handed to the client module, whose sweep-aware delta rule decides;
+    /// its "nothing new to credit" refusal is a benign no-op here, and any
+    /// other failure (e.g. a proof gone stale because the anchor rotated
+    /// mid-flight, or the anchored block still predating a just-made deposit)
+    /// surfaces as `Err` for the caller to `warn!` -- the service simply
+    /// retries on its normal cadence and NEVER emits a user-facing Failed
+    /// event.
+    ///
+    /// On success emits the `Claimed` event with the full credited delta (no
+    /// fee on this path, so the event amount equals the minted e-cash) and
+    /// rotates the hot hint off the address. Returns whether anything was
+    /// credited.
+    async fn usdt_try_submit_deposit_proof(
+        &self,
+        address: EvmAddress,
+        keypair: &Keypair,
+    ) -> Result<bool> {
+        let usdt = self.client.usdt()?;
+        let _guard = self.usdt_claim_guard.lock().await;
+
+        let anchored = usdt.latest_anchored_block().await?;
+        if anchored.latest == 0 {
+            // The federation has not anchored any confirmation-deep block
+            // yet; nothing to prove against. Retry next tick.
+            debug!(%address, "usdt deposit proof: no anchored block yet, retrying next tick");
+            return Ok(false);
+        }
+
+        let claim_pk = keypair.public_key();
+        let before = usdt.deposit_status(claim_pk).await?;
+
+        let (proof, proven) = EthJsonRpc::new(self.usdt_evm_rpc_urls().await)?
+            .fetch_deposit_proof(usdt.config().usdt_contract, address, anchored.latest)
+            .await?;
+        if proven.0 == 0 && before.credited.0 == 0 {
+            // Empty account that was never credited: nothing a proof could
+            // add. (A once-credited account is NOT skipped even at
+            // `proven == 0`: after a server-side sweep the post-sweep proven
+            // balance resets while `credited` stays, and only the client
+            // module's sweep-aware rule can tell whether anything is new.)
+            debug!(
+                %address,
+                anchored = anchored.latest,
+                "usdt deposit proof pre-check: account empty and never credited, nothing to submit"
+            );
+            return Ok(false);
+        }
+
+        match usdt
+            .submit_prebuilt_deposit_proof(keypair, proof, proven)
+            .await
+        {
+            Ok(_) => {}
+            // The client refuses proofs that prove nothing over the already
+            // credited total -- the normal steady state for an address whose
+            // deposit was already credited. Benign, not an error.
+            Err(err) if err.to_string().contains("nothing new to credit") => {
+                debug!(%address, "usdt deposit proof proves nothing new");
+                return Ok(false);
+            }
+            Err(err) => return Err(err),
+        }
+
+        // No deposit fee on the proof path: the minted e-cash equals the
+        // newly credited delta.
+        let after = usdt.deposit_status(claim_pk).await?;
+        let credited = UsdtAmount(after.credited.0.saturating_sub(before.credited.0));
+        self.emit_usdt_deposit_claimed(address, credited);
+        self.usdt_clear_deposit_hint(address);
+        Ok(true)
     }
 
     /// Claims `address`'s deposit if anything is claimable right now, under
@@ -625,6 +803,12 @@ impl FederationV2 {
     /// Emits the `Claimed` event (net of the deposit fee, matching history
     /// and balance) and rotates the hot hint off the address on success.
     /// Returns whether a claim was made.
+    ///
+    /// LEGACY drain: under the deposit-by-proof model crediting and minting
+    /// are atomic (`usdt_try_submit_deposit_proof`), so `claimable` can only
+    /// be nonzero for balances the guardians credited under the pre-proof
+    /// observation model. This path (and its deposit-fee semantics) exists to
+    /// drain those.
     async fn usdt_claim_if_claimable(
         &self,
         address: EvmAddress,
