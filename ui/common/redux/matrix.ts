@@ -1956,11 +1956,15 @@ export const checkForReceivablePayments = createAsyncThunk<
         fedimint: FedimintBridge
         roomId?: MatrixRoom['id']
         receivedPayments: Set<string>
+        claimUsdtPayments?: boolean
     },
     { state: CommonState }
 >(
     'matrix/checkForReceivablePayments',
-    async ({ fedimint, roomId, receivedPayments }, { getState, dispatch }) => {
+    async (
+        { fedimint, roomId, receivedPayments, claimUsdtPayments = true },
+        { getState, dispatch },
+    ) => {
         const state = getState()
         const myId = state.matrix.auth?.userId
         if (!myId) return
@@ -1988,6 +1992,7 @@ export const checkForReceivablePayments = createAsyncThunk<
             timeline,
             myId,
             walletFederations,
+            claimUsdtPayments,
         )
         log.info(`Found ${receivablePayments.length} receivable payments`)
 
@@ -2025,6 +2030,7 @@ export const checkForReceivablePayments = createAsyncThunk<
             timeline,
             myId,
             walletFederations,
+            claimUsdtPayments,
         )
         log.info(
             `Found ${reclaimablePayments.length} potentially-reclaimable payments`,

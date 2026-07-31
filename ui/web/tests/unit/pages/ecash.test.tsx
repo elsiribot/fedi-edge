@@ -126,6 +126,7 @@ describe('/pages/ecash', () => {
 
     describe('when the ecash is denominated in USDT', () => {
         beforeEach(() => {
+            claimEcashSpy.mockClear()
             parseEcashReturn = {
                 ...defaultParseEcashReturn,
                 parsed: {
@@ -148,25 +149,23 @@ describe('/pages/ecash', () => {
             })
         })
 
-        it('should call claimEcash with the usdt-stamped parsed ecash', async () => {
+        // Web has no USDT balance/send/receive/history surface, so claiming
+        // here would strand the funds in a wallet the user can't see —
+        // instead of a claim CTA, point the user at the mobile app
+        it('should hide the claim ecash button and point the user at the mobile app', async () => {
             renderWithProviders(<EcashPage />, { store })
 
-            const button = screen.getByLabelText(
-                i18n.t('feature.ecash.claim-ecash'),
-            )
-            user.click(button)
-
             await waitFor(() => {
-                expect(claimEcashSpy).toHaveBeenCalledWith(
-                    {
-                        amount: 5_000_000,
-                        federation_id: '1',
-                        federation_type: 'joined',
-                        unit: 'usdt',
-                    },
-                    '123',
-                )
+                expect(
+                    screen.getByText(
+                        i18n.t('feature.ecash.claim-usdt-on-mobile'),
+                    ),
+                ).toBeInTheDocument()
             })
+            expect(
+                screen.queryByLabelText(i18n.t('feature.ecash.claim-ecash')),
+            ).not.toBeInTheDocument()
+            expect(claimEcashSpy).not.toHaveBeenCalled()
         })
     })
 

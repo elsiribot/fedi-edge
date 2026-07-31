@@ -127,12 +127,21 @@ export function initializeCommonStore({
     storage,
     i18n,
     detectLanguage,
+    claimUsdtPayments = true,
 }: {
     store: ReturnType<typeof setupStore>
     fedimint: FedimintBridge
     storage: StorageApi
     i18n: I18n
     detectLanguage?: () => Promise<string>
+    /**
+     * Whether this platform auto-claims (and auto-reclaims) USDT-denominated
+     * chat payments. Platforms without a USDT wallet surface (web) must pass
+     * `false` so USDT ecash isn't redeemed into a balance the user can't see
+     * or spend there — the payment stays pending in chat and a platform that
+     * supports USDT (the phone) claims it later.
+     */
+    claimUsdtPayments?: boolean
 }) {
     const receivedPayments = new Set<string>()
 
@@ -268,7 +277,13 @@ export function initializeCommonStore({
             await dispatch(refreshFederations(fedimint))
             // we check for receivable chat payments from this newly
             // joined federation after recovery is complete
-            dispatch(checkForReceivablePayments({ fedimint, receivedPayments }))
+            dispatch(
+                checkForReceivablePayments({
+                    fedimint,
+                    receivedPayments,
+                    claimUsdtPayments,
+                }),
+            )
         },
     )
 
@@ -314,6 +329,7 @@ export function initializeCommonStore({
                     fedimint,
                     roomId,
                     receivedPayments,
+                    claimUsdtPayments,
                 }),
             )
         },

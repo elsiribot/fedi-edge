@@ -161,6 +161,27 @@ function EcashPage() {
                 {t('words.cancel')}
             </Button>
         )
+    } else if (parsedEcash.unit === 'usdt') {
+        // Web has no USDT balance/send/receive/history surface, so claiming
+        // here would strand the funds in a wallet the user can't see — point
+        // them at the mobile app instead.
+        const { label } = getEcashAmountDisplay(parsedEcash, formatUsdt)
+        content = (
+            <Content>
+                <Icon icon="Cash" size="lg" />
+                <Text variant="h2" weight="medium">
+                    {label}
+                </Text>
+                <Text variant="body">
+                    {t('feature.ecash.claim-usdt-on-mobile')}
+                </Text>
+            </Content>
+        )
+        actions = (
+            <Button width="full" variant="tertiary" href={homeRoute}>
+                {t('words.okay')}
+            </Button>
+        )
     } else {
         const { label, unknownUnit } = getEcashAmountDisplay(parsedEcash, formatUsdt)
         content = (

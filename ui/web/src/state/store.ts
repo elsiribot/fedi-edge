@@ -21,6 +21,10 @@ export function initializeWebStore() {
         storage: asyncLocalStorage,
         i18n,
         detectLanguage,
+        // Web has no USDT balance/send/receive/history surface, so it must
+        // not auto-claim USDT chat payments — they stay pending in chat
+        // until the user's phone claims them.
+        claimUsdtPayments: false,
     })
 
     return unsubscribe

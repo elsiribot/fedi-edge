@@ -25,6 +25,7 @@ import { BridgeError } from '../../../utils/errors'
 import {
     consolidatePaymentEvents,
     getReceivablePaymentEvents,
+    getReclaimablePaymentEvents,
     makeMatrixPaymentText,
 } from '../../../utils/matrix'
 import { formatUsdtMicros } from '../../../utils/usdt'
@@ -1043,6 +1044,93 @@ describe('unsupported ecash unit auto-claim eligibility', () => {
         )
 
         expect(receivable).toHaveLength(0)
+    })
+
+    // BUSINESS: platforms without a USDT wallet surface (web passes
+    // `claimUsdtPayments: false` to `initializeCommonStore`) must leave USDT
+    // payments pending in chat for the phone to claim — claiming there would
+    // strand the funds in a balance the user can't see or spend
+    describe('usdt platform gating', () => {
+        const buildUsdtPushEvent = () =>
+            createMockPaymentEvent({
+                content: {
+                    unit: 'usdt',
+                    status: 'pushed',
+                    amount: 1_500_000,
+                    ecash: 'mock-ecash-token',
+                    senderId: 'npub1sender',
+                    recipientId: 'npub1recipient',
+                    federationId: 'fed123',
+                },
+            })
+        const joinedFederations = [
+            { id: 'fed123', recovering: false } as any,
+        ]
+
+        it('includes a usdt payment by default (native keeps claiming them)', () => {
+            const receivable = getReceivablePaymentEvents(
+                [buildUsdtPushEvent()],
+                'npub1recipient',
+                joinedFederations,
+            )
+
+            expect(receivable).toHaveLength(1)
+        })
+
+        it('excludes a usdt payment when includeUsdt is false (web), while bitcoin payments stay claimable', () => {
+            const bitcoinEvent = createMockPaymentEvent({
+                id: 'event-btc' as RpcTimelineEventItemId,
+                content: {
+                    paymentId: 'pay-btc',
+                    status: 'pushed',
+                    amount: 1000,
+                    ecash: 'mock-btc-ecash-token',
+                    senderId: 'npub1sender',
+                    recipientId: 'npub1recipient',
+                    federationId: 'fed123',
+                },
+            })
+
+            const receivable = getReceivablePaymentEvents(
+                [buildUsdtPushEvent(), bitcoinEvent],
+                'npub1recipient',
+                joinedFederations,
+                false,
+            )
+
+            expect(receivable).toHaveLength(1)
+            expect(receivable[0].content.paymentId).toBe('pay-btc')
+        })
+
+        it('excludes a rejected usdt payment from reclaiming when includeUsdt is false (web)', () => {
+            const rejectedUsdtEvent = createMockPaymentEvent({
+                content: {
+                    unit: 'usdt',
+                    status: 'rejected',
+                    amount: 1_500_000,
+                    ecash: 'mock-ecash-token',
+                    senderId: 'npub1sender',
+                    recipientId: 'npub1recipient',
+                    federationId: 'fed123',
+                },
+            })
+
+            expect(
+                getReclaimablePaymentEvents(
+                    [rejectedUsdtEvent],
+                    'npub1sender',
+                    joinedFederations,
+                ),
+            ).toHaveLength(1)
+            expect(
+                getReclaimablePaymentEvents(
+                    [rejectedUsdtEvent],
+                    'npub1sender',
+                    joinedFederations,
+                    false,
+                ),
+            ).toHaveLength(0)
+        })
     })
 
     it('claimMatrixPayment (the auto-claim dispatch) makes zero receiveEcash/usdtReceiveEcash calls for an unsupported unit', async () => {

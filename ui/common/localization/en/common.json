@@ -727,6 +727,7 @@
             "claim-ecash-description": "Click on the button below to claim your ecash",
             "claim-ecash-error": "Failed to claim ecash",
             "claim-ecash-new-members-disabled": "This ecash cannot be claimed because this wallet service is not accepting new members",
+            "claim-usdt-on-mobile": "USDT ecash can't be claimed here yet. Open the Fedi mobile app to claim it.",
             "claim-cancelled": "Claim cancelled",
             "claiming-ecash": "Claiming ecash…",
             "could-not-parse-token": "Could not parse the ecash token",

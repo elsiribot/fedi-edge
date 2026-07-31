@@ -671,6 +671,7 @@ export function getReceivablePaymentEvents(
     timeline: (MatrixEvent | null)[],
     myId: string,
     myFederations: LoadedFederation[],
+    includeUsdt = true,
 ) {
     const latestPayments: Record<string, MatrixPaymentEvent> = {}
     timeline.forEach(item => {
@@ -683,6 +684,16 @@ export function getReceivablePaymentEvents(
         if (getPaymentUnit(item.content) === 'unsupported') {
             log.info(
                 `can't claim ecash payment ${item.content.paymentId}: unsupported ecash unit`,
+            )
+            return
+        }
+        // platforms without a USDT wallet surface (web) must not claim
+        // USDT-denominated ecash — the funds would land in a balance the
+        // user can't see or spend there. Leave the payment pending so a
+        // platform that supports USDT (the phone) claims it later.
+        if (!includeUsdt && getPaymentUnit(item.content) === 'usdt') {
+            log.info(
+                `can't claim ecash payment ${item.content.paymentId}: usdt is not supported on this platform`,
             )
             return
         }
@@ -716,6 +727,7 @@ export function getReclaimablePaymentEvents(
     timeline: (MatrixEvent | null)[],
     myId: string,
     myFederations: LoadedFederation[],
+    includeUsdt = true,
 ) {
     const reclaimableEvents: Array<MatrixPaymentEvent> = []
     timeline.forEach(item => {
@@ -730,6 +742,15 @@ export function getReclaimablePaymentEvents(
         if (getPaymentUnit(item.content) === 'unsupported') {
             log.info(
                 `can't reclaim ecash payment ${item.content.paymentId}: unsupported ecash unit`,
+            )
+            return
+        }
+        // reclaiming redeems the notes back to this device's balance, so
+        // platforms without a USDT wallet surface (web) must leave rejected
+        // USDT payments alone for a platform that supports USDT to reclaim
+        if (!includeUsdt && getPaymentUnit(item.content) === 'usdt') {
+            log.info(
+                `can't reclaim ecash payment ${item.content.paymentId}: usdt is not supported on this platform`,
             )
             return
         }
