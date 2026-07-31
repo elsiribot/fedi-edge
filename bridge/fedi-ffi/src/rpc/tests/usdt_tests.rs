@@ -4,8 +4,10 @@
 //! USDT-denominated `mintv2`, no Bitcoin wallet / lightning modules) against
 //! a real anvil EVM devnet, real cggmp21 DKG included, then drives the whole
 //! user flow through bridge APIs: join federation -> readiness -> deposit
-//! address -> on-chain ERC-20 deposit -> background auto-claim into USDT
-//! e-cash -> balance -> withdrawal submission.
+//! address -> on-chain ERC-20 deposit -> background deposit-proof crediting
+//! (the deposit service fetches an `eth_getProof` balance proof from anvil
+//! and submits it; credit + mint atomic, no deposit fee) -> balance ->
+//! withdrawal submission.
 //!
 //! Because the real DKG takes minutes and needs `anvil` + `bitcoind` (from
 //! the nix dev shell), this test only runs when `RUN_USDT_TESTS` is set; see
@@ -142,6 +144,11 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
         federation.usdt_supported(),
         "joined federation must report the usdt module"
     );
+    // Deposit-by-proof: the bridge deposit service fetches `eth_getProof`
+    // balance proofs itself. Point its EVM RPC resolution at the e2e anvil --
+    // a devfed has no operator `usdt:evm_rpc_url` meta and the client
+    // module's built-in defaults are mainnet-only.
+    federation.usdt_set_evm_rpc_url_override(Some(anvil.rpc_url()));
     let balance = federation.usdt_balance().await?;
     ensure!(balance.0 == 0, "fresh client must start at zero balance");
 
@@ -181,21 +188,19 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
          (got {address_again}, expected {address})"
     );
 
-    // Fees scale with anvil's (high) default gas price, so size everything
-    // relative to the current quote: the deposit fee is deducted from the
-    // claim and the withdrawal needs its own fee headroom on top.
+    // Deposit-by-proof charges NO deposit fee (crediting and minting are one
+    // atomic transaction), so the deposit only needs headroom for the LATER
+    // withdrawal's fee (deducted from the withdrawn amount), which scales
+    // with anvil's (high) default gas price. `* 4` is comfortable headroom
+    // over the single withdrawal below. Round to a multiple of the mintv2
+    // minimum client denomination (512): the atomic credit+mint issues the
+    // credited delta rounded DOWN to that granularity, so a 512-multiple
+    // deposit mints exactly in full and the equality assertions below stay
+    // tight.
     let fee_quote = federation
         .usdt_withdraw_fee_quote(RpcUsdtAmount(MIN_NET_DEPOSIT))
         .await?;
-    // `* 24`, not a minimal margin: since the v0.11.0-fedi7-usdt.2 client,
-    // `claim` refuses (and the deposit service retries forever) while the
-    // DEPOSIT fee quote exceeds 25% of the claimable amount, and the deposit
-    // quote runs well above this WITHDRAW quote (first sweep pays
-    // `needs_deploy` gas). `* 6` sized the deposit right at that 25%
-    // boundary on the anvil devnet (observed: quote 3.94 USDT vs a 15.74
-    // USDT deposit) and the claim never happened; the extra headroom keeps
-    // the fee comfortably inside the sanity guard.
-    let transfer_amount = UsdtAmount(MIN_NET_DEPOSIT + fee_quote.0 * 24);
+    let transfer_amount = UsdtAmount((MIN_NET_DEPOSIT + fee_quote.0 * 4).next_multiple_of(512));
 
     info!(%address, amount = transfer_amount.0, "sending on-chain USDT to the deposit address");
     let deposit_address: EvmAddress = address.parse()?;
@@ -205,27 +210,36 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
     // The bridge's long-lived deposit service (usdtGenerateDepositAddress
     // marked the address hot, so it is polled every
     // `federations::federation_v2::usdt::USDT_HOT_POLL_INTERVAL` = 15s)
-    // must observe, claim, and mint USDT e-cash without further prompting.
-    info!("waiting for the deposit service to auto-claim the deposit");
+    // must fetch a balance proof, submit it, and mint USDT e-cash without
+    // further prompting. anvil only mines on demand, so keep the head (and
+    // with it the guardians' anchored confirmation-deep block) moving past
+    // the funding transfer while we wait -- with a stalled head the service's
+    // proof could target a block from before the transfer forever.
+    info!("waiting for the deposit service to submit the deposit proof");
     poll_until(Duration::from_secs(300), Duration::from_secs(2), || async {
+        mine_blocks(&anvil, 1).await?;
         Ok(federation.usdt_balance().await?.0 > 0)
     })
     .await
-    .context("deposit was never auto-claimed into USDT e-cash")?;
+    .context("deposit was never proof-credited into USDT e-cash")?;
 
     let balance = federation.usdt_balance().await?;
     ensure!(
-        balance.0 >= MIN_NET_DEPOSIT,
-        "claimed balance {} must cover at least the net deposit target {MIN_NET_DEPOSIT} \
-         (transferred {} at quote {})",
+        balance.0 == transfer_amount.0,
+        "deposit-by-proof mints the FULL deposit (no deposit fee): balance {} != transferred {}",
         balance.0,
         transfer_amount.0,
-        fee_quote.0,
     );
-    info!(balance = balance.0, "deposit auto-claimed");
+    info!(balance = balance.0, "deposit proof-credited in full");
 
-    // Deposit status must reflect the claim.
+    // Deposit status must reflect the atomic credit + claim (mint).
     let status = federation.usdt_deposit_status(address.clone()).await?;
+    ensure!(
+        status.credited.0 == transfer_amount.0,
+        "deposit status must show the full transfer credited (credited {}, transferred {})",
+        status.credited.0,
+        transfer_amount.0,
+    );
     ensure!(status.claimed.0 > 0, "deposit status must show a claim");
     ensure!(
         status.claimable.0 == 0,
@@ -482,6 +496,10 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
         federation.usdt_balance().await?.0 == 0,
         "fresh client must start at zero USDT balance"
     );
+    // Deposit-by-proof: point the bridge deposit service's proof fetcher at
+    // the e2e anvil (no operator `usdt:evm_rpc_url` meta in a devfed; the
+    // client module's built-in defaults are mainnet-only).
+    federation.usdt_set_evm_rpc_url_override(Some(anvil.rpc_url()));
 
     // Composition: enumerate the mintv2 instances the DKG actually built. This
     // is shape (d): config-gen attaches exactly one instance per module kind,
@@ -659,32 +677,33 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
     .await
     .context("fee median never converged")?;
     let address = federation.usdt_generate_deposit_address().await?;
+    // Deposit-by-proof charges NO deposit fee; size the deposit with
+    // headroom only for the later USDT ops, as a 512-multiple so the atomic
+    // credit+mint issues it exactly in full (see the sibling test).
     let fee_quote = federation
         .usdt_withdraw_fee_quote(RpcUsdtAmount(MIN_NET_DEPOSIT))
         .await?;
-    // `* 24`, not a minimal margin: since the v0.11.0-fedi7-usdt.2 client,
-    // `claim` refuses (and the deposit service retries forever) while the
-    // DEPOSIT fee quote exceeds 25% of the claimable amount, and the deposit
-    // quote runs well above this WITHDRAW quote (first sweep pays
-    // `needs_deploy` gas). `* 6` sized the deposit right at that 25%
-    // boundary on the anvil devnet (observed: quote 3.94 USDT vs a 15.74
-    // USDT deposit) and the claim never happened; the extra headroom keeps
-    // the fee comfortably inside the sanity guard.
-    let transfer_amount = UsdtAmount(MIN_NET_DEPOSIT + fee_quote.0 * 24);
+    let transfer_amount = UsdtAmount((MIN_NET_DEPOSIT + fee_quote.0 * 4).next_multiple_of(512));
     let deposit_address: EvmAddress = address.parse()?;
     info!(%address, amount = transfer_amount.0, "sending on-chain USDT to the deposit address");
     transfer_erc20_from_account_1(&anvil, token, deposit_address, transfer_amount).await?;
     mine_blocks(&anvil, 3).await?;
-    info!("waiting for the deposit service to auto-claim the deposit into USDT e-cash");
+    // Keep anvil's on-demand-mined head (and thus the guardians' anchored
+    // confirmation-deep block) moving past the funding transfer while the
+    // bridge deposit service fetches + submits the balance proof.
+    info!("waiting for the deposit service to proof-credit the deposit into USDT e-cash");
     poll_until(Duration::from_secs(300), Duration::from_secs(2), || async {
+        mine_blocks(&anvil, 1).await?;
         Ok(federation.usdt_balance().await?.0 > 0)
     })
     .await
-    .context("deposit was never auto-claimed into USDT e-cash")?;
+    .context("deposit was never proof-credited into USDT e-cash")?;
     let usdt_funded = federation.usdt_balance().await?.0;
     ensure!(
-        usdt_funded >= MIN_NET_DEPOSIT,
-        "claimed USDT balance {usdt_funded} must cover the net deposit {MIN_NET_DEPOSIT}"
+        usdt_funded == transfer_amount.0,
+        "deposit-by-proof mints the FULL deposit (no deposit fee): balance {usdt_funded} != \
+         transferred {}",
+        transfer_amount.0,
     );
     // Funding USDT must NOT have touched the Bitcoin balance.
     ensure!(
@@ -725,11 +744,14 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
         usdt_received.0,
         usdt_send.0
     );
-    let usdt_after_roundtrip = federation.usdt_balance().await?.0;
-    ensure!(
-        usdt_after_roundtrip > usdt_after_send,
-        "receiving the USDT note back must restore USDT balance ({usdt_after_roundtrip} !> {usdt_after_send})"
-    );
+    // The re-received notes are credited asynchronously after the receive
+    // operation reports Success; poll like the BTC re-receive above (and
+    // assertion 5 below) instead of racing the issuance with a single read.
+    poll_until(Duration::from_secs(60), Duration::from_secs(1), || async {
+        Ok(federation.usdt_balance().await?.0 > usdt_after_send)
+    })
+    .await
+    .context("receiving the USDT note back never restored the USDT balance")?;
     ensure!(
         federation.get_balance().await == btc_baseline,
         "USDT receive must not change the Bitcoin balance"
