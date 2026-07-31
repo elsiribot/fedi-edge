@@ -1536,6 +1536,17 @@ export function useMatrixPaymentTransaction({
                     // `parseEcash` is the bridge RPC (Rust-side
                     // `validate_ecash`); logs/tests may say "validate".
                     const info = await fedimint.parseEcash(ecash)
+                    // The attached note must actually be USDT-denominated:
+                    // a bitcoin note's msat amount would otherwise render
+                    // as a "verified" USDT amount. Treat a unit mismatch as
+                    // a verification failure, same as the catch arm below.
+                    if (info.unit !== 'usdt') {
+                        log.warn(
+                            `Ecash attached to USDT payment ${event.content.paymentId} is denominated in '${info.unit}', not usdt, will fall back to displaying the declared (unverified) amount`,
+                        )
+                        setVerifiedAmountMicros(null)
+                        return
+                    }
                     setVerifiedAmountMicros(info.amount)
                     log.debug(
                         `Verified USDT payment amount for ${event.content.paymentId}: ${info.amount} micros`,

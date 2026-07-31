@@ -609,6 +609,53 @@ describe('useMatrixPaymentTransaction USDT ecash verification', () => {
         expect(result.current.error).not.toBeNull()
     })
 
+    it('treats ecash denominated in a non-usdt unit as a verification failure, never surfacing its amount as verified', async () => {
+        const store = setupStore()
+        store.dispatch(
+            setMatrixAuth({ userId: 'npub1recipient' } as MatrixAuth),
+        )
+
+        // A bitcoin note attached to a message stamped `unit: 'usdt'` — its
+        // msat amount must never be rendered via the USDT formatter as a
+        // "verified" USDT amount.
+        const mockFedimint = createMockFedimintBridge({
+            parseEcash: {
+                federation_type: 'joined',
+                federation_id: 'fed123',
+                amount: 1_000_000_000, // msats, not micros
+                unit: 'bitcoin',
+            },
+        })
+
+        const event = createMockPaymentEvent({
+            content: {
+                unit: 'usdt',
+                status: 'pushed',
+                amount: 1_000_000_000,
+                ecash: 'mock-ecash-token',
+                senderId: 'npub1sender',
+                recipientId: 'npub1recipient',
+                federationId: 'fed123',
+            },
+        })
+
+        const { result } = renderHookWithState(
+            () => useMatrixPaymentTransaction({ event }),
+            store,
+            mockFedimint,
+        )
+
+        await waitFor(() => {
+            expect(result.current.hasTriedFetch).toBe(true)
+        })
+
+        expect(mockFedimint.parseEcash).toHaveBeenCalledWith('mock-ecash-token')
+        // null (not the note's msat amount) — same as the failed-validation
+        // case: the caller falls back to the declared-amount display and the
+        // hook never claims it verified a USDT amount it didn't
+        expect(result.current.verifiedAmountMicros).toBeNull()
+    })
+
     it('marks requests (no ecash attached) as having nothing to verify, without calling validateEcash', async () => {
         const store = setupStore()
         store.dispatch(
