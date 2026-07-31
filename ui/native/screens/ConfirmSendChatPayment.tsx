@@ -1,6 +1,6 @@
 import { NativeStackScreenProps } from '@react-navigation/native-stack'
 import { Button, Divider, Text, Theme, useTheme } from '@rneui/themed'
-import React, { useCallback, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { StyleSheet } from 'react-native'
 
@@ -14,12 +14,17 @@ import {
 import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import {
     selectCurrency,
+    selectLoadedFederations,
     selectMatrixRoom,
     selectPaymentFederation,
 } from '@fedi/common/redux'
 import { Sats } from '@fedi/common/types'
 import { RpcEcashUnit } from '@fedi/common/types/bindings'
 import amountUtils from '@fedi/common/utils/AmountUtils'
+import {
+    hasUsdtModule,
+    isUsdtOnlyFederation,
+} from '@fedi/common/utils/FederationUtils'
 
 import ChatAvatar from '../components/feature/chat/ChatAvatar'
 import FederationWalletSelector from '../components/feature/send/FederationWalletSelector'
@@ -129,6 +134,20 @@ const ConfirmSendChatPaymentInner: React.FC<{
             unit,
         )
 
+    // The unit is frozen from the route, so only offer federations able to
+    // hold ecash of that unit: USDT-capable ones for usdt, bitcoin-capable
+    // (not USDT-only) ones for bitcoin.
+    const federations = useAppSelector(selectLoadedFederations)
+    const allowedFederationIds = useMemo(
+        () =>
+            federations
+                .filter(f =>
+                    isUsdt ? hasUsdtModule(f) : !isUsdtOnlyFederation(f),
+                )
+                .map(f => f.id),
+        [federations, isUsdt],
+    )
+
     const onSend = useCallback(async () => {
         handleSendPayment(
             isUsdt ? usdtAmountMicros : btcAmount,
@@ -152,7 +171,11 @@ const ConfirmSendChatPaymentInner: React.FC<{
 
     return (
         <SafeAreaContainer style={style.container} edges="notop">
-            <FederationWalletSelector fullWidth />
+            <FederationWalletSelector
+                fullWidth
+                showBalance={!isUsdt}
+                allowedFederationIds={allowedFederationIds}
+            />
             <Column style={style.content} fullWidth align="center" grow>
                 <Column style={style.amountContainer} align="center" fullWidth>
                     {isUsdt ? (

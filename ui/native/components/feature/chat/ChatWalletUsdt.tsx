@@ -62,7 +62,9 @@ const ChatWalletUsdt: React.FC<{
     return (
         <SafeAreaContainer edges="notop">
             <Column grow gap="lg" style={style.container}>
-                <FederationWalletSelector fullWidth />
+                {/* The msat balance the selector would show is meaningless
+                    here — the USDT balance renders below the amount input */}
+                <FederationWalletSelector fullWidth showBalance={false} />
                 <UsdtAmountInput
                     amountInput={amountInput}
                     onChangeAmountInput={setAmountInput}

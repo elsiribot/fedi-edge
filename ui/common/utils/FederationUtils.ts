@@ -414,6 +414,41 @@ export const hasSocialModule = (federation: LoadedFederation) => {
     }
 }
 
+export const hasUsdtModule = (federation: LoadedFederation) => {
+    if (!federation.clientConfig) return false
+    const { modules } = federation.clientConfig
+    for (const key in modules) {
+        // TODO: add better typing for this
+        const fmModule = modules[key] as Partial<{ kind: string }>
+        if (fmModule.kind === 'usdt') {
+            return true
+        }
+    }
+    return false
+}
+
+/**
+ * A federation is USDT-only if it has a USDT module but no bitcoin
+ * wallet or lightning modules (mirrors `useIsUsdtOnlyFederation`).
+ */
+export const isUsdtOnlyFederation = (federation: LoadedFederation) => {
+    if (!hasUsdtModule(federation) || !federation.clientConfig) return false
+    const { modules } = federation.clientConfig
+    for (const key in modules) {
+        // TODO: add better typing for this
+        const fmModule = modules[key] as Partial<{ kind: string }>
+        if (
+            fmModule.kind === 'wallet' ||
+            fmModule.kind === 'walletv2' ||
+            fmModule.kind === 'ln' ||
+            fmModule.kind === 'lnv2'
+        ) {
+            return false
+        }
+    }
+    return true
+}
+
 export const getDefaultGroupChats = (
     metadata: FederationMetadata,
 ): string[] => {
