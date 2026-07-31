@@ -682,7 +682,11 @@ impl FederationV2 {
             }));
     }
 
-    fn spawn_usdt_withdrawal_watcher(&self, txid: TransactionId) {
+    /// Spawns the watcher polling a withdrawal to its terminal status and
+    /// emitting `UsdtWithdrawal` events on every status change. Called on
+    /// `usdt_withdraw` and re-armed for in-flight withdrawals on restart
+    /// (see the `"usdt"` arm of `subscribe_to_operation` in mod.rs).
+    pub(super) fn spawn_usdt_withdrawal_watcher(&self, txid: TransactionId) {
         self.spawn_cancellable("usdt_withdrawal_watcher", move |fed| async move {
             let out_point = OutPoint { txid, out_idx: 0 };
             let Ok(usdt) = fed.client.usdt() else {

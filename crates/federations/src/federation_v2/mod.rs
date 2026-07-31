@@ -76,6 +76,7 @@ use fedimint_mint_client::api::MintFederationApi;
 use fedimint_mint_client::config::MintClientConfig;
 use fedimint_mint_client::{MintClientInit, MintClientModule};
 use fedimint_mintv2_client::ECash as MintV2ECash;
+use fedimint_usdt_client::UsdtOperationMeta;
 use fedimint_usdt_common::EvmAddress;
 use fedimint_wallet_client::{DepositStateV2, PegOutFees, WalletClientInit};
 use fedimint_walletv2_client::WalletClientModule as WalletV2ClientModule;
@@ -107,8 +108,8 @@ use runtime::constants::{
     ECASH_INTERNAL_CHANGE_TIMEOUT_MAINNET, ECASH_INTERNAL_CHANGE_TIMEOUT_MUTINYNET,
     LIGHTNING_OPERATION_TYPE, LIGHTNINGV2_OPERATION_TYPE, MILLION, MINT_OPERATION_TYPE,
     MINTV2_OPERATION_TYPE, RECURRINGD_API_META, REISSUE_ECASH_TIMEOUT,
-    STABILITY_POOL_OPERATION_TYPE, STABILITY_POOL_V2_OPERATION_TYPE, WALLET_OPERATION_TYPE,
-    WALLETV2_OPERATION_TYPE,
+    STABILITY_POOL_OPERATION_TYPE, STABILITY_POOL_V2_OPERATION_TYPE, USDT_OPERATION_TYPE,
+    WALLET_OPERATION_TYPE, WALLETV2_OPERATION_TYPE,
 };
 use runtime::db::FederationPendingRejoinFromScratchKey;
 use runtime::nightly_panic;
@@ -1717,6 +1718,21 @@ impl FederationV2 {
                 // aware of the transfer after it has already been completed
                 StabilityPoolMeta::ExternalTransferIn { .. } => (),
             },
+            USDT_OPERATION_TYPE => {
+                // Re-arm the withdrawal watcher for in-flight withdrawals
+                // after a restart, so `UsdtWithdrawal` events keep flowing
+                // until the terminal status (the attached refund state
+                // machine keeps the operation active until then, and the
+                // watcher self-terminates once the status is terminal).
+                // Deposit claims need no watcher: the long-lived deposit
+                // service owns their lifecycle.
+                if let UsdtOperationMeta::Withdraw {
+                    txid: Some(txid), ..
+                } = operation.meta::<UsdtOperationMeta>()
+                {
+                    self.spawn_usdt_withdrawal_watcher(txid);
+                }
+            }
             // FIXME: should I return an error or just log something?
             _ => {
                 tracing::debug!(

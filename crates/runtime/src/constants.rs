@@ -49,6 +49,7 @@ pub const WALLET_OPERATION_TYPE: &str = "wallet";
 pub const WALLETV2_OPERATION_TYPE: &str = "walletv2";
 pub const STABILITY_POOL_OPERATION_TYPE: &str = "stability_pool";
 pub const STABILITY_POOL_V2_OPERATION_TYPE: &str = "multi_sig_stability_pool";
+pub const USDT_OPERATION_TYPE: &str = "usdt";
 
 // URL for Fedi fee schedule API
 pub const FEDI_FEE_API_URL_MUTINYNET: &str =
