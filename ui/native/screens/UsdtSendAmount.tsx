@@ -3,7 +3,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import { Button, Input, Text, Theme, useTheme } from '@rneui/themed'
 import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { StyleSheet } from 'react-native'
+import { Pressable, StyleSheet } from 'react-native'
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
@@ -61,14 +61,18 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
 
     const [recipient, setRecipient] = useState(route.params.recipient)
     const [feeMicros, setFeeMicros] = useState<number | null>(null)
+    const [feeQuoteFailed, setFeeQuoteFailed] = useState(false)
+    const [feeQuoteAttempt, setFeeQuoteAttempt] = useState(0)
     const [isSubmitting, setIsSubmitting] = useState(false)
 
     const trimmedRecipient = recipient.trim()
     const isRecipientValid = isValidEvmAddress(trimmedRecipient)
 
-    // Quote the network fee whenever a valid amount is entered
+    // Quote the network fee whenever a valid amount is entered (and again on
+    // a manual retry after a failed quote, via `feeQuoteAttempt`)
     useEffect(() => {
         setFeeMicros(null)
+        setFeeQuoteFailed(false)
         if (!federationId || amountMicros === null || amountMicros <= 0) return
         let cancelled = false
 
@@ -78,14 +82,19 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
                 .then(fee => {
                     if (!cancelled) setFeeMicros(fee)
                 })
-                .catch(e => log.warn('Failed to quote USDT withdrawal fee', e))
+                .catch(e => {
+                    log.warn('Failed to quote USDT withdrawal fee', e)
+                    // surface the failure: `canSend` gates on a quote, so a
+                    // silent failure would leave Send disabled forever
+                    if (!cancelled) setFeeQuoteFailed(true)
+                })
         }, 300)
 
         return () => {
             cancelled = true
             clearTimeout(timeout)
         }
-    }, [amountMicros, federationId, fedimint])
+    }, [amountMicros, federationId, fedimint, feeQuoteAttempt])
 
     const handlePasteRecipient = async () => {
         const pasted = await Clipboard.getString()
@@ -214,6 +223,15 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
                                     </Text>
                                 </Row>
                             </Column>
+                        ) : feeQuoteFailed ? (
+                            <Pressable
+                                onPress={() =>
+                                    setFeeQuoteAttempt(attempt => attempt + 1)
+                                }>
+                                <Text caption style={style.feeError}>
+                                    {t('feature.usdt.fee-quote-error')}
+                                </Text>
+                            </Pressable>
                         ) : null
                     }
                 />
@@ -243,6 +261,10 @@ const styles = (theme: Theme) =>
             marginHorizontal: theme.spacing.lg,
             backgroundColor: theme.colors.offWhite100,
             borderRadius: theme.borders.tileRadius,
+        },
+        feeError: {
+            color: theme.colors.red,
+            textAlign: 'center',
         },
         button: {
             marginTop: theme.spacing.md,

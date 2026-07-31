@@ -1554,6 +1554,7 @@
             "invalid-amount": "Invalid amount",
             "insufficient-balance": "Insufficient balance",
             "network-fee": "Network fee",
+            "fee-quote-error": "Couldn't load the network fee. Tap to retry.",
             "recipient-receives": "Recipient receives",
             "sent-to": "Sent to {{address}}",
             "you-sent-payment": "You sent {{amount}}",
