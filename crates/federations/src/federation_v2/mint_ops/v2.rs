@@ -59,9 +59,21 @@ impl MintOps for MintOpsV2 {
             .unit()
             .unwrap_or(fedimint_core::module::AmountUnit::BITCOIN);
         let mintv2 = fed.client.mintv2_of_unit(note_unit).await?;
-        let fee_ppms = fed
-            .get_fee_ppms_by_stream(fedimint_mint_client::KIND, RpcTransactionDirection::Receive)
-            .await?;
+        // Fedi fees (and the fiat stamp) only apply to bitcoin-denominated
+        // notes: the fee ledger is msat-denominated and USDT ecash carries
+        // no Fedi fees per product decision (see usdt.rs).
+        let is_bitcoin_note = note_unit == fedimint_core::module::AmountUnit::BITCOIN;
+        let fee_ppms = if is_bitcoin_note {
+            Some(
+                fed.get_fee_ppms_by_stream(
+                    fedimint_mint_client::KIND,
+                    RpcTransactionDirection::Receive,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
         let custom_meta = serde_json::to_value(EcashReceiveMetadata {
             internal: false,
             reason: EcashReceiveReason::Receive,
@@ -71,9 +83,11 @@ impl MintOps for MintOpsV2 {
             unit: super::super::usdt::rpc_ecash_unit(note_unit),
         })?;
         let operation_id = mintv2.receive(ecash, custom_meta).await?;
-        fed.write_pending_receive_fedi_fee_ppms(operation_id, &fee_ppms)
-            .await?;
-        let _ = fed.record_tx_date_fiat_info(operation_id, amount).await;
+        if let Some(fee_ppms) = fee_ppms {
+            fed.write_pending_receive_fedi_fee_ppms(operation_id, &fee_ppms)
+                .await?;
+            let _ = fed.record_tx_date_fiat_info(operation_id, amount).await;
+        }
         fed.subscribe_to_operation(operation_id).await?;
         Ok((amount, operation_id))
     }
@@ -174,7 +188,11 @@ impl MintOps for MintOpsV2 {
             .receive(decoded, custom_meta)
             .await
             .context(ErrorCode::EcashCancelFailed)?;
-        let _ = fed.record_tx_date_fiat_info(operation_id, amount).await;
+        // The fiat stamp only makes sense for msat amounts — a USDT note's
+        // "msats" are 10^-6 USDT units.
+        if note_unit == fedimint_core::module::AmountUnit::BITCOIN {
+            let _ = fed.record_tx_date_fiat_info(operation_id, amount).await;
+        }
         let final_state = mintv2
             .await_final_receive_operation_state(operation_id)
             .await
@@ -235,8 +253,11 @@ impl MintOps for MintOpsV2 {
                             frontend_metadata: None,
                             unit: super::super::usdt::rpc_ecash_unit(note_unit),
                         });
-                    let is_fee_exempt =
-                        receive_meta.internal || receive_meta.reason == EcashReceiveReason::Cancel;
+                    // Non-bitcoin notes never had a pending fee written (see
+                    // `receive_ecash` above) and must not book one on success.
+                    let is_fee_exempt = receive_meta.internal
+                        || receive_meta.reason == EcashReceiveReason::Cancel
+                        || note_unit != fedimint_core::module::AmountUnit::BITCOIN;
                     fed.spawn_cancellable("subscribe mintv2 receive", move |fed| async move {
                         let Ok(mintv2) = fed.client.mintv2_of_unit(note_unit).await else {
                             warn!("no mintv2 instance for unit {note_unit:?}");
