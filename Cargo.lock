@@ -4502,7 +4502,7 @@ dependencies = [
  "fedimint-core",
  "fedimint-threshold-crypto",
  "hex",
- "impl-tools",
+ "impl-tools 0.13.0",
  "secp256k1 0.29.1",
  "serde",
  "strum 0.27.2",
@@ -5808,7 +5808,7 @@ dependencies = [
  "bitcoin",
  "fedimint-core",
  "hex",
- "impl-tools",
+ "impl-tools 0.10.3",
  "miniscript",
  "serde",
  "thiserror 2.0.18",
@@ -7295,9 +7295,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ae95c9095c2f1126d7db785955c73cdc5fc33e7c3fa911bd4a42931672029a7"
 dependencies = [
  "autocfg",
- "impl-tools-lib",
+ "impl-tools-lib 0.11.4",
  "proc-macro-error2",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "impl-tools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b03e37277215a23886b25b386775553bf5f380691ea0b5fad6e74a6c2a8617a2"
+dependencies = [
+ "autocfg",
+ "impl-tools-lib 0.13.0",
+ "proc-macro-error3",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -7310,6 +7322,18 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "impl-tools-lib"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd7947353f97f01aadba80214d75253db73a66c0310f4e4608f4a71ffcea8217"
+dependencies = [
+ "proc-macro-error3",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.3",
 ]
 
 [[package]]
@@ -10961,6 +10985,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "proc-macro-error-attr3"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b0084e6206a967a2dad822180626b2f6b07a3b379325e8f1ec0438e33a469ba7"
+dependencies = [
+ "proc-macro2",
+ "quote",
+]
+
+[[package]]
 name = "proc-macro-error2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10970,6 +11004,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "proc-macro-error3"
+version = "3.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0cf066225f2373bc711684792b69bdeac0356019b007e721090c24d92d5d5a50"
+dependencies = [
+ "proc-macro-error-attr3",
+ "proc-macro2",
+ "quote",
 ]
 
 [[package]]
@@ -13356,6 +13401,17 @@ name = "syn"
 version = "2.0.117"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e665b8803e7b1d2a727f4023456bbbbe74da67099c585258af0ad9c5013b9b99"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "unicode-ident",
+]
+
+[[package]]
+name = "syn"
+version = "3.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "53e9bae58849f64dfa4f5d5ae372c8341f7305f82a3868709269343628b659a3"
 dependencies = [
  "proc-macro2",
  "quote",
