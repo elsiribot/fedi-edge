@@ -4547,7 +4547,7 @@ dependencies = [
  "futures",
  "gloo-console",
  "gloo-file",
- "gloo-utils",
+ "gloo-utils 0.2.0",
  "imbl 6.1.0",
  "js-sys",
  "rexie",
@@ -4878,7 +4878,7 @@ dependencies = [
  "fedimint-db-locked",
  "fedimint-logging",
  "futures",
- "gloo-utils",
+ "gloo-utils 0.2.0",
  "imbl 5.0.0",
  "redb 2.6.3",
  "redb 3.1.3",
@@ -6476,11 +6476,11 @@ checksum = "9985c9503b412198aa4197559e9a318524ebc4519c229bfa05a535828c950b9d"
 
 [[package]]
 name = "gloo-console"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a17868f56b4a24f677b17c8cb69958385102fa879418052d60b50bc1727e261"
+checksum = "9f1d5cec0b97edb53f21221f799c659cef3764ad5a00eca52950eb9b902028ba"
 dependencies = [
- "gloo-utils",
+ "gloo-utils 0.3.0",
  "js-sys",
  "serde",
  "wasm-bindgen",
@@ -6518,7 +6518,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-sink",
- "gloo-utils",
+ "gloo-utils 0.2.0",
  "http",
  "js-sys",
  "pin-project",
@@ -6559,6 +6559,19 @@ name = "gloo-utils"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b5555354113b18c547c1d3a98fbf7fb32a9ff4f6fa112ce823a21641a0ba3aa"
+dependencies = [
+ "js-sys",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "web-sys",
+]
+
+[[package]]
+name = "gloo-utils"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4202275d95a142fa209a1e35e91c250a710c5600731372cd3464a39ed01573d6"
 dependencies = [
  "js-sys",
  "serde",
@@ -8837,7 +8850,7 @@ dependencies = [
  "base64 0.22.1",
  "futures-util",
  "getrandom 0.4.2",
- "gloo-utils",
+ "gloo-utils 0.2.0",
  "growable-bloom-filter",
  "hkdf",
  "js-sys",

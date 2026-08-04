@@ -17,7 +17,7 @@ runtime = { workspace = true }
 rpc-types = { workspace = true }
 futures = { workspace = true }
 gloo-utils = "0.2"
-gloo-console = "0.3"
+gloo-console = "0.4"
 gloo-file = "0.3"
 imbl.workspace = true
 js-sys = "0.3.77"
