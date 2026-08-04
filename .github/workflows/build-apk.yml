@@ -48,8 +48,8 @@ jobs:
 
             - name: Build APK (devDebug)
               env:
-                  DEV_ID: eric
-                  DEV_NAME: "Eric's Fedi"
+                  DEV_ID: edge
+                  DEV_NAME: "Fedi Edge"
                   GRADLE_OPTS: -Xmx4g
               run: |
                   nix develop -c bash -c '
@@ -72,10 +72,10 @@ jobs:
                   echo "Found APK: $APK"
                   unzip -l "$APK" | grep 'lib/arm64-v8a/libfediffi.so'
                   SHORT_SHA=${GITHUB_SHA::7}
-                  OUT="fedi-edge-devdebug-${SHORT_SHA}.apk"
+                  OUT="fedi-edge-${SHORT_SHA}.apk"
                   cp "$APK" "$OUT"
                   echo "APK_FILE=$OUT" >> "$GITHUB_OUTPUT"
-                  echo "APK_NAME=fedi-edge-devdebug-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+                  echo "APK_NAME=fedi-edge-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
             - name: Upload APK artifact
               uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
