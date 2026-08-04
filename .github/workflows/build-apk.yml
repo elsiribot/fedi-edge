@@ -1,0 +1,86 @@
+name: Build Android APK (edge)
+on:
+    push:
+        branches:
+            - master
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+jobs:
+    build-apk:
+        name: Build dev-flavor debug APK
+        runs-on: ubuntu-latest
+        timeout-minutes: 350
+        steps:
+            - name: Free disk space
+              uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be # v1.3.1
+              with:
+                  tool-cache: true
+                  android: true
+                  dotnet: true
+                  haskell: true
+                  large-packages: true
+                  docker-images: true
+                  swap-storage: false
+
+            - name: Checkout repo
+              uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+            - uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72 # v30
+              with:
+                  nix_path: nixpkgs=channel:nixos-22.05
+                  extra_nix_config: |
+                      accept-flake-config = true
+
+            # Public read-only use of the fedibtc cache; no auth token so
+            # nothing is pushed back.
+            - uses: cachix/cachix-action@ad2ddac53f961de1989924296a1f236fcfbaa4fc # v15
+              with:
+                  name: fedibtc
+
+            - name: Build bridge
+              run: nix develop -c env BUILD_ALL_BRIDGE_TARGETS=1 CARGO_PROFILE=release ./scripts/bridge/build-bridge-android.sh
+
+            - name: Build UI dependencies
+              run: nix develop -c ./scripts/ui/build-deps.sh
+
+            - name: Build APK (devDebug)
+              env:
+                  DEV_ID: eric
+                  DEV_NAME: "Eric's Fedi"
+                  GRADLE_OPTS: -Xmx4g
+              run: |
+                  nix develop -c bash -c '
+                    set -euo pipefail
+                    cd ui/native/android
+                    # The RN bundle task can go stale; force a fresh JS bundle.
+                    ./gradlew :app:createBundleDevDebugJsAndAssets --rerun-tasks -PdevId="$DEV_ID" -PdevName="$DEV_NAME"
+                    ./gradlew assembleDevDebug -PdevId="$DEV_ID" -PdevName="$DEV_NAME"
+                  '
+
+            - name: Verify bridge library in APK
+              id: verify-apk
+              run: |
+                  set -euo pipefail
+                  APK=$(find ui/native/android/app/build/outputs/apk/dev/debug -name '*.apk' | head -1)
+                  if [[ -z "$APK" ]]; then
+                    echo "No APK found!" >&2
+                    exit 1
+                  fi
+                  echo "Found APK: $APK"
+                  unzip -l "$APK" | grep 'lib/arm64-v8a/libfediffi.so'
+                  SHORT_SHA=${GITHUB_SHA::7}
+                  OUT="fedi-edge-devdebug-${SHORT_SHA}.apk"
+                  cp "$APK" "$OUT"
+                  echo "APK_FILE=$OUT" >> "$GITHUB_OUTPUT"
+                  echo "APK_NAME=fedi-edge-devdebug-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+            - name: Upload APK artifact
+              uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+              with:
+                  name: ${{ steps.verify-apk.outputs.APK_NAME }}
+                  path: ${{ steps.verify-apk.outputs.APK_FILE }}
+                  retention-days: 14
+                  if-no-files-found: error
