@@ -6,7 +6,7 @@ on:
     workflow_dispatch:
 
 permissions:
-    contents: read
+    contents: write # release-per-commit uploads the APK as a GitHub release
 
 jobs:
     build-apk:
@@ -84,3 +84,24 @@ jobs:
                   path: ${{ steps.verify-apk.outputs.APK_FILE }}
                   retention-days: 14
                   if-no-files-found: error
+
+            - name: Publish release for this commit
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  APK_FILE: ${{ steps.verify-apk.outputs.APK_FILE }}
+              run: |
+                  set -euo pipefail
+                  SHORT_SHA=${GITHUB_SHA::7}
+                  TAG="edge-${SHORT_SHA}"
+                  SUBJECT=$(git log -1 --format=%s "$GITHUB_SHA")
+                  NOTES=$(printf '%s\n\nAutomated edge build of %s.' "$SUBJECT" "$GITHUB_SHA")
+                  if gh release view "$TAG" >/dev/null 2>&1; then
+                    # Re-run of the same commit: replace the asset.
+                    gh release upload "$TAG" "$APK_FILE" --clobber
+                  else
+                    gh release create "$TAG" "$APK_FILE" \
+                      --target "$GITHUB_SHA" \
+                      --prerelease \
+                      --title "Fedi Edge ${SHORT_SHA}" \
+                      --notes "$NOTES"
+                  fi
