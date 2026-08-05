@@ -36,7 +36,7 @@ import { FedimintBridge } from './fedimint'
 import { isDeepLink, normalizeDeepLink } from './linking'
 import { makeLog } from './log'
 import { decodeFediMatrixRoomUri, decodeFediMatrixUserUri } from './matrix'
-import { parseUsdtRecipientInput } from './usdt'
+import { isTronAddress, parseUsdtRecipientInput } from './usdt'
 import { isValidInternetIdentifier } from './validation'
 import {
     decodeLegacyDirectChatLink,
@@ -198,6 +198,16 @@ export async function parseUserInput<T extends TFunction>(
 
     const offlineResult = await tryParsers(offlineParsers)
     if (offlineResult) return offlineResult
+
+    // A Tron address is unmistakably a wrong-network paste (exchange-held
+    // USDT is often TRC-20), so explain that instead of falling through to
+    // the generic unsupported copy. Checked offline — no network needed.
+    if (isTronAddress(raw)) {
+        return {
+            type: ParserDataType.Unknown,
+            data: { message: t('feature.usdt.tron-address-unsupported') },
+        }
+    }
 
     if (!isInternetUnreachable) {
         const onlineResult = await tryParsers(onlineParsers)

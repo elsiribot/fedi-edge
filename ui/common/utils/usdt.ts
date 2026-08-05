@@ -283,6 +283,16 @@ export function isValidEvmAddress(address: string): boolean {
     return /^0x[0-9a-fA-F]{40}$/.test(address)
 }
 
+/**
+ * Detects a Tron (TRC-20) address: base58 (no 0/O/I/l), `T` prefix, 34
+ * chars. Tron is where most exchange-held USDT lives, so a user pasting
+ * one deserves a "wrong network" explanation rather than a generic
+ * "invalid address" — this wallet's USDT is ERC-20 on Ethereum.
+ */
+export function isTronAddress(address: string): boolean {
+    return /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address.trim())
+}
+
 export type ParsedUsdtRecipient = {
     /** Bare `0x…` recipient address */
     address: string

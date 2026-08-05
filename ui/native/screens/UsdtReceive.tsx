@@ -199,6 +199,21 @@ const UsdtReceive: React.FC<Props> = () => {
                                 </>
                             )}
                         </Row>
+                        <Row gap="sm" style={style.statusContainer}>
+                            <SvgImage
+                                name="AlertWarningTriangle"
+                                size="sm"
+                                color={theme.colors.darkGrey}
+                            />
+                            <Column gap="xs" shrink>
+                                <Text caption medium>
+                                    {t('feature.usdt.network-notice-title')}
+                                </Text>
+                                <Text small color={theme.colors.darkGrey}>
+                                    {t('feature.usdt.network-notice-body')}
+                                </Text>
+                            </Column>
+                        </Row>
                     </Column>
                 </ReceiveQr>
             </Column>

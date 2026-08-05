@@ -453,6 +453,34 @@ describe('parseUserInput', () => {
         expect(parsed.type).not.toEqual(ParserDataType.EvmAddress)
     })
 
+    it('explains a Tron (TRC-20) address instead of generic unknown copy', async () => {
+        // Tether's well-known TRC-20 contract address — the realistic
+        // wrong-network paste from an exchange withdrawal page.
+        const tronAddress = 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t'
+        const parsed = await parseUserInput(
+            tronAddress,
+            fedimint,
+            t,
+            mockFedId,
+            false,
+        )
+        expect(parsed.type).toEqual(ParserDataType.Unknown)
+        expect(parsed.data).toEqual({
+            message: t('feature.usdt.tron-address-unsupported'),
+        })
+    })
+
+    it('explains a Tron address even while offline', async () => {
+        const parsed = await parseUserInput(
+            'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
+            fedimint,
+            t,
+            mockFedId,
+            true,
+        )
+        expect(parsed.type).toEqual(ParserDataType.Unknown)
+    })
+
     it('does not parse a 64-hex (txid-like) string as an EVM address', async () => {
         // A 32-byte value (e.g. a transaction id) is 64 hex chars — twice the
         // 40 hex chars of a 20-byte EVM address. Even with an `0x` prefix it

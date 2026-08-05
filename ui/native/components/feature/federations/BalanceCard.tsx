@@ -82,7 +82,7 @@ export default function WalletBalanceCard({
     } else if (paymentType === 'usdt') {
         iconName = 'UsdtCircle'
         iconColor = undefined
-        headerTitle = t('feature.usdt.usdt-balance')
+        headerTitle = t('feature.usdt.usdt-balance-network')
         primaryAmount = formatUsdt(usdtBalanceMicros)
         secondaryAmount = null
     }

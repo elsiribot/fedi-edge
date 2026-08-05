@@ -17,7 +17,7 @@ import {
 } from '@fedi/common/redux'
 import { hexToRgba } from '@fedi/common/utils/color'
 import { makeLog } from '@fedi/common/utils/log'
-import { isValidEvmAddress } from '@fedi/common/utils/usdt'
+import { isTronAddress, isValidEvmAddress } from '@fedi/common/utils/usdt'
 
 import { Column, Row } from '../components/ui/Flex'
 import { PressableIcon } from '../components/ui/PressableIcon'
@@ -176,7 +176,9 @@ const UsdtSendAmount: React.FC<Props> = ({ navigation, route }) => {
                     }
                     errorMessage={
                         trimmedRecipient.length > 0 && !isRecipientValid
-                            ? t('feature.usdt.invalid-address')
+                            ? isTronAddress(trimmedRecipient)
+                                ? t('feature.usdt.tron-address-unsupported')
+                                : t('feature.usdt.invalid-address')
                             : undefined
                     }
                 />

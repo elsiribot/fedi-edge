@@ -2,6 +2,7 @@ import type { RpcUsdtWithdrawalStatus } from '../../../types/bindings'
 import amountUtils from '../../../utils/AmountUtils'
 import {
     formatUsdtMicros,
+    isTronAddress,
     isValidEvmAddress,
     microsToDecimalString,
     parseUsdtInput,
@@ -239,6 +240,38 @@ describe('usdt utils', () => {
             expect(
                 isValidEvmAddress('0xZZC17F958D2ee523a2206206994597C13D831ec7'),
             ).toBe(false)
+        })
+    })
+
+    describe('isTronAddress', () => {
+        it('accepts base58 T-prefixed 34-char addresses', () => {
+            expect(isTronAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t')).toBe(
+                true,
+            )
+            expect(isTronAddress('  TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t ')).toBe(
+                true,
+            )
+        })
+
+        it('rejects non-Tron inputs', () => {
+            expect(isTronAddress('')).toBe(false)
+            // EVM address
+            expect(
+                isTronAddress('0xdAC17F958D2ee523a2206206994597C13D831ec7'),
+            ).toBe(false)
+            // wrong length
+            expect(isTronAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6')).toBe(
+                false,
+            )
+            expect(isTronAddress('TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6tt')).toBe(
+                false,
+            )
+            // non-base58 characters (0, O, I, l)
+            expect(isTronAddress('T0OIlHqjeKQxGTCi8q8ZY4pL8otSzgjLj6')).toBe(
+                false,
+            )
+            // T-prefixed English word paste must not trigger the Tron copy
+            expect(isTronAddress('Transactions')).toBe(false)
         })
     })
 
