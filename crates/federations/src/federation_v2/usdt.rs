@@ -373,6 +373,13 @@ impl FederationV2 {
     pub async fn usdt_receive_ecash(&self, ecash: String) -> Result<RpcUsdtAmount> {
         let mintv2 = self.client.mintv2_of_unit(USDT_UNIT).await?;
         let decoded: MintV2ECash = decode_prefixed(FEDIMINT_PREFIX, &ecash)?;
+        // This RPC claims into the USDT-denominated mintv2 instance only. A
+        // v2 note in another unit (or a legacy unitless = bitcoin note) must
+        // go through the generic receive path instead — claiming it here
+        // could only fail after the transaction is already built.
+        if decoded.unit() != Some(USDT_UNIT) {
+            bail!("not a USDT-denominated ecash note");
+        }
         let amount = decoded.amount();
         let custom_meta = serde_json::to_value(EcashReceiveMetadata {
             internal: false,
