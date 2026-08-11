@@ -46,7 +46,7 @@ use rpc_types::FrontendMetadata;
 use rpc_types::usdt::{RpcUsdtAmount, RpcUsdtTransactionKind, RpcUsdtWithdrawalStatus};
 use tracing::info;
 
-use crate::rpc;
+use crate::rpc::{self, TryGet as _};
 use crate::test_device::TestDevice;
 
 /// Minimum NET e-cash amount for the deposit (multiple of the mintv2
@@ -132,9 +132,9 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
     let invite_code = fed.invite_code()?;
 
     info!("joining via the bridge");
-    let td = TestDevice::new().await?;
+    let mut td = TestDevice::new().await?;
     let bridge = td.bridge_full().await?;
-    let rpc_federation = rpc::joinFederation(bridge, invite_code, false).await?;
+    let rpc_federation = rpc::joinFederation(bridge, invite_code.clone(), false).await?;
     let federation = bridge
         .federations
         .get_federation(&rpc_federation.id.0)
@@ -339,12 +339,14 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
         ecash_send_amount.0 > 0 && balance_before_sends >= ecash_send_amount.0 * 4,
         "need USDT balance to cover three e-cash sends (have {balance_before_sends})"
     );
+    let mut sent_notes = Vec::new();
     for i in 0..3 {
         let sent = federation
             .usdt_generate_ecash(ecash_send_amount, false, FrontendMetadata::default())
             .await
             .with_context(|| format!("usdt e-cash send #{i} failed"))?;
         ensure!(!sent.ecash.is_empty(), "send #{i} produced empty ecash");
+        sent_notes.push(sent.ecash);
     }
 
     let recent = federation.usdt_list_transactions(2, None).await?;
@@ -370,6 +372,76 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
         older.iter().all(|tx| tx.created_at <= cursor.unwrap()),
         "paged rows must be no newer than the supplied cursor"
     );
+
+    // --- Backup + seed recovery into a USDT-only federation ---
+    // REGRESSION: `perform_nonce_reuse_check` runs when a join-with-recovery
+    // completes and used to `.expect` a (v1) mint module — which this
+    // federation does not have — panicking the bridge on the very join this
+    // leg performs. The check must skip gracefully and the recovered wallet
+    // must end up at the same settled balance.
+    //
+    // Settle the three outstanding e-cash sends first (re-receive our own
+    // notes) so the recovered balance has an exact expectation.
+    info!("re-receiving own sent notes to settle the balance before backup");
+    for (i, ecash) in sent_notes.into_iter().enumerate() {
+        federation
+            .usdt_receive_ecash(ecash)
+            .await
+            .with_context(|| format!("re-receiving own usdt note #{i} failed"))?;
+    }
+    // Sends are fee-free and the notes sum to the sent amounts, so
+    // re-receiving all three returns the balance exactly to its
+    // pre-sends level (issuance is async, hence the poll).
+    let settled_balance = balance_before_sends;
+    poll_until(Duration::from_secs(60), Duration::from_secs(1), || async {
+        Ok(federation.usdt_balance().await?.0 == settled_balance)
+    })
+    .await
+    .context("balance never settled after re-receiving own notes")?;
+
+    info!("backing up and shutting down the first device");
+    let mnemonic = rpc::getMnemonic(bridge.runtime.clone()).await?;
+    rpc::backupNow(federation.clone()).await?;
+    // give the backup upload a moment to complete before shutting down
+    fedimint_core::task::sleep(Duration::from_secs(1)).await;
+    drop(federation);
+    td.shutdown().await?;
+
+    info!("recovering the seed on a fresh device and rejoining");
+    let mut td2 = TestDevice::new().await?;
+    let recovery_bridge = td2.bridge_maybe_onboarding().await?;
+    rpc::restoreMnemonic(recovery_bridge.try_get()?, mnemonic).await?;
+    rpc::onboardTransferExistingDeviceRegistration(recovery_bridge.try_get()?, 0).await?;
+    let recovery_bridge = td2.bridge_full().await?;
+
+    let rpc_federation = rpc::joinFederation(recovery_bridge, invite_code, false).await?;
+    let recovered_id = rpc_federation.id.0.clone();
+
+    // Pre-fix, the nonce-reuse check panicked between recovery completion
+    // and the `recoveryComplete` event, so the event never fired and the
+    // federation stayed unusable.
+    poll_until(Duration::from_secs(300), Duration::from_secs(1), || async {
+        Ok(td2
+            .event_sink()
+            .num_events_of_type("recoveryComplete".into())
+            == 1)
+    })
+    .await
+    .context("recovery never completed (nonce-reuse check panicked?)")?;
+
+    let recovered_federation = recovery_bridge
+        .federations
+        .get_federation(&recovered_id)
+        .context("federation must be usable after recovery + nonce check")?;
+    recovered_federation.usdt_set_evm_rpc_url_override(Some(anvil.rpc_url()));
+    poll_until(Duration::from_secs(60), Duration::from_secs(1), || async {
+        Ok(recovered_federation.usdt_balance().await?.0 == settled_balance)
+    })
+    .await
+    .with_context(|| {
+        format!("recovered USDT balance never reached the settled pre-backup balance {settled_balance}")
+    })?;
+    td2.shutdown().await?;
 
     info!("usdt bridge e2e complete");
     Ok(())

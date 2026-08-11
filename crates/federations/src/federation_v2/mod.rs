@@ -1792,9 +1792,19 @@ impl FederationV2 {
         assert!(!self.recovering());
 
         let client_config = self.client.config().await;
-        let (mint_instance, cfg) = client_config
+        // A federation without a (v1) mint module — e.g. a USDT-only
+        // federation — has no blind nonces this check could inspect. mintv2
+        // has no nonce-reuse endpoint (yet), so its recovery proceeds
+        // without this protection rather than panicking here.
+        let (mint_instance, cfg) = match client_config
             .get_first_module_by_kind::<MintClientConfig>(fedimint_mint_client::KIND)
-            .expect("mint module must be present in config");
+        {
+            Ok(module) => module,
+            Err(err) => {
+                info!(%err, "Skipping nonce check: federation has no (v1) mint module");
+                return true;
+            }
+        };
 
         let mut dbtx = self.client.db().begin_transaction().await;
         let Some(version_set) = dbtx.get_value(&CachedApiVersionSetKey).await else {
