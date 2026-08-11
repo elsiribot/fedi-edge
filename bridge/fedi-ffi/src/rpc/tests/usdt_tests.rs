@@ -553,7 +553,7 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
     info!("joining via the bridge");
     let td = TestDevice::new().await?;
     let bridge = td.bridge_full().await?;
-    let rpc_federation = rpc::joinFederation(bridge, invite_code, false).await?;
+    let rpc_federation = rpc::joinFederation(bridge, invite_code.clone(), false).await?;
     let federation = bridge
         .federations
         .get_federation(&rpc_federation.id.0)
@@ -861,6 +861,91 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
         "crediting a USDT note through the generic path must not change the Bitcoin balance"
     );
 
+    // --- Assertion 5b: re-claiming a note THIS client already claimed must
+    // never double-credit. The claim resolves to the same operation id as
+    // the original receive, so today it reports idempotent success; a clean
+    // already-spent error would be equally acceptable. What must NEVER
+    // happen is a second credit.
+    let usdt_before_double = federation.usdt_balance().await?.0;
+    match federation.usdt_receive_ecash(usdt_note_2.ecash.clone()).await {
+        Ok(amount) => ensure!(
+            amount.0 == usdt_send.0,
+            "idempotent re-claim must report the original amount, got {}",
+            amount.0
+        ),
+        Err(err) => ensure!(
+            matches!(
+                err.downcast_ref::<rpc_types::error::ErrorCode>(),
+                Some(rpc_types::error::ErrorCode::EcashAlreadySpent)
+            ),
+            "same-client re-claim may only fail with EcashAlreadySpent, got: {err:?}"
+        ),
+    }
+    fedimint_core::task::sleep(Duration::from_secs(2)).await;
+    ensure!(
+        federation.usdt_balance().await?.0 == usdt_before_double,
+        "re-claiming an own already-claimed note must not double-credit"
+    );
+
+    // --- Assertion 5c: a DIFFERENT wallet claiming an already-claimed note
+    // (the field scenario: several users scanning the same shared note) must
+    // fail cleanly with EcashAlreadySpent — no crash, no balance change, and
+    // the claimer stays fully operational. This also regression-covers the
+    // mintv2 refund-on-rejection path in the mixed shape: with mintv1
+    // present, a wrong-unit refund (the pre-usdt.6 bug) would NOT panic —
+    // it would strand an invalid BTC-balanced refund tx silently, which the
+    // liveness assertions below would catch.
+    info!("joining with a second device to attempt a cross-client double-claim");
+    let claimer_td = TestDevice::new().await?;
+    let claimer_bridge = claimer_td.bridge_full().await?;
+    let claimer_rpc_fed = rpc::joinFederation(claimer_bridge, invite_code, false).await?;
+    let claimer_federation = claimer_bridge
+        .federations
+        .get_federation(&claimer_rpc_fed.id.0)
+        .context("second device must join the mixed federation")?;
+    claimer_federation.usdt_set_evm_rpc_url_override(Some(anvil.rpc_url()));
+
+    let double_claim_err = claimer_federation
+        .usdt_receive_ecash(usdt_note_2.ecash.clone())
+        .await
+        .err()
+        .context("cross-client claim of an already-claimed USDT note must fail")?;
+    ensure!(
+        matches!(
+            double_claim_err.downcast_ref::<rpc_types::error::ErrorCode>(),
+            Some(rpc_types::error::ErrorCode::EcashAlreadySpent)
+        ),
+        "cross-client double-claim must surface ErrorCode::EcashAlreadySpent, got: {double_claim_err:?}"
+    );
+    // The rejected claim (and its refund attempt) must not mint anything.
+    fedimint_core::task::sleep(Duration::from_secs(2)).await;
+    ensure!(
+        claimer_federation.usdt_balance().await?.0 == 0,
+        "claimer must not be credited for an already-claimed note"
+    );
+    ensure!(
+        federation.usdt_balance().await?.0 == usdt_before_double,
+        "original owner's USDT balance must be unchanged by a foreign double-claim"
+    );
+    ensure!(
+        federation.get_balance().await == btc_baseline,
+        "BTC balance must be unchanged by a rejected USDT double-claim"
+    );
+    // Claimer liveness: a FRESH note from the first wallet must still claim
+    // fine (pre-usdt.6 the rejection killed the claimer's sm-executor).
+    let fresh_note = federation
+        .usdt_generate_ecash(usdt_send, false, FrontendMetadata::default())
+        .await?;
+    claimer_federation
+        .usdt_receive_ecash(fresh_note.ecash)
+        .await
+        .context("claimer must stay operational after the rejected double-claim")?;
+    poll_until(Duration::from_secs(60), Duration::from_secs(1), || async {
+        Ok(claimer_federation.usdt_balance().await?.0 == usdt_send.0)
+    })
+    .await
+    .context("claimer never received the fresh cross-client note")?;
+
     // --- Assertion 8: a stamped USDT note validates as unit `usdt` ---
     let usdt_parsed = bridge
         .federations
@@ -938,13 +1023,16 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
     );
     // Structural (not amount-coincidence) BTC-absence check: assert the USDT
     // history contains EXACTLY the USDT e-cash ops we performed above and no
-    // more — 3 sends (usdt_generate_ecash at the initial send, the generic-
-    // receive setup, and the with-invite send) and 2 receives (usdt_receive_
-    // ecash + the generic receive_ecash of a USDT note). A leaked BITCOIN-unit
-    // mintv2 op would surface here as an extra EcashSend/EcashReceive row
-    // regardless of its msats, so pinning the per-kind counts proves BTC ops
-    // are absent by operation kind/identity, not merely because their amount
-    // failed to coincide with a USDT micro amount.
+    // more — 4 sends (usdt_generate_ecash at the initial send, the generic-
+    // receive setup, the cross-client liveness note of assertion 5c, and the
+    // with-invite send) and 2 receives (usdt_receive_ecash + the generic
+    // receive_ecash of a USDT note; the 5b re-claim reuses the original
+    // operation so it must NOT add a row, and 5c's claims live on the OTHER
+    // device's log). A leaked BITCOIN-unit mintv2 op would surface here as an
+    // extra EcashSend/EcashReceive row regardless of its msats, so pinning
+    // the per-kind counts proves BTC ops are absent by operation
+    // kind/identity, not merely because their amount failed to coincide with
+    // a USDT micro amount.
     let usdt_send_count = usdt_txns
         .iter()
         .filter(|tx| matches!(tx.kind, RpcUsdtTransactionKind::EcashSend))
@@ -954,8 +1042,8 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
         .filter(|tx| matches!(tx.kind, RpcUsdtTransactionKind::EcashReceive))
         .count();
     ensure!(
-        usdt_send_count == 3 && usdt_receive_count == 2,
-        "USDT history must contain exactly the 3 USDT e-cash sends and 2 \
+        usdt_send_count == 4 && usdt_receive_count == 2,
+        "USDT history must contain exactly the 4 USDT e-cash sends and 2 \
          receives performed above (no leaked BITCOIN mintv2 ops), got \
          {usdt_send_count} sends and {usdt_receive_count} receives: {usdt_txns:?}"
     );
