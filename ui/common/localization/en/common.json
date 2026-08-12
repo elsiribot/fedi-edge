@@ -1580,7 +1580,6 @@
             "request-amount": "Request amount",
             "requesting-amount": "Requesting: {{amount}}",
             "deposit-address": "Deposit address",
-            "transaction-id": "Fedimint transaction ID",
             "user-operation": "User operation",
             "view-on-explorer": "View on explorer",
             "block": "Block",

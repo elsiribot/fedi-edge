@@ -139,18 +139,11 @@ const UsdtHistoryDetailOverlay: React.FC<Props> = ({
             copyable: true,
             truncated: true,
         })
-        if (txn.kind.txid) {
-            items.push({
-                label: t('feature.usdt.transaction-id'),
-                value: txn.kind.txid,
-                copyable: true,
-                truncated: true,
-            })
-        }
-        // The ERC-4337 user-op hash is what block explorers can resolve
-        // (the fedimint txid above is federation-internal). Known once the
-        // withdrawal reaches Signing; absent for withdrawals confirmed
-        // before the app started persisting it.
+        // The federation-internal fedimint txid is deliberately not shown:
+        // users paste it into block explorers and conclude the withdrawal
+        // is fake. The ERC-4337 user-op hash below is what explorers can
+        // actually resolve. Known once the withdrawal reaches Signing;
+        // absent for withdrawals confirmed before the app persisted it.
         const opHash =
             status?.type === 'signing' || status?.type === 'submitted'
                 ? status.opHash
