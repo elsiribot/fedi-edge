@@ -2,7 +2,7 @@ import { Text, Theme, useTheme } from '@rneui/themed'
 import { TFunction } from 'i18next'
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { StyleSheet, TouchableOpacity, View } from 'react-native'
+import { Linking, StyleSheet, TouchableOpacity, View } from 'react-native'
 
 import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
 import {
@@ -145,6 +145,32 @@ const UsdtHistoryDetailOverlay: React.FC<Props> = ({
                 value: txn.kind.txid,
                 copyable: true,
                 truncated: true,
+            })
+        }
+        // The ERC-4337 user-op hash is what block explorers can resolve
+        // (the fedimint txid above is federation-internal). Known once the
+        // withdrawal reaches Signing; absent for withdrawals confirmed
+        // before the app started persisting it.
+        const opHash =
+            status?.type === 'signing' || status?.type === 'submitted'
+                ? status.opHash
+                : status?.type === 'confirmed'
+                  ? status.opHash
+                  : null
+        if (opHash) {
+            items.push({
+                label: t('feature.usdt.user-operation'),
+                value: opHash,
+                copyable: true,
+                truncated: true,
+            })
+            items.push({
+                label: t('feature.usdt.view-on-explorer'),
+                value: 'jiffyscan.xyz',
+                onPress: () =>
+                    Linking.openURL(
+                        `https://jiffyscan.xyz/userOpHash/${opHash}?network=mainnet`,
+                    ),
             })
         }
     } else if (txn.kind.type === 'deposit') {

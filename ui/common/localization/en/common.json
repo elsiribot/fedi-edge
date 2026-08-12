@@ -1581,6 +1581,8 @@
             "requesting-amount": "Requesting: {{amount}}",
             "deposit-address": "Deposit address",
             "transaction-id": "Transaction ID",
+            "user-operation": "User operation",
+            "view-on-explorer": "View on explorer",
             "block": "Block",
             "status-queued": "Queued",
             "status-signing": "Signing",

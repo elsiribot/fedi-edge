@@ -364,6 +364,7 @@ describe('usdt utils', () => {
         const confirmed: RpcUsdtWithdrawalStatus = {
             type: 'confirmed',
             block: 1,
+            opHash: null,
         }
         const failed: RpcUsdtWithdrawalStatus = { type: 'failed', reason: 'x' }
 

@@ -313,8 +313,8 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
             RpcUsdtWithdrawalStatus::Failed { reason } => {
                 bail!("withdrawal failed: {reason}")
             }
-            RpcUsdtWithdrawalStatus::Signing
-            | RpcUsdtWithdrawalStatus::Submitted
+            RpcUsdtWithdrawalStatus::Signing { .. }
+            | RpcUsdtWithdrawalStatus::Submitted { .. }
             | RpcUsdtWithdrawalStatus::Confirmed { .. } => break,
             RpcUsdtWithdrawalStatus::Queued => {}
         }

@@ -108,6 +108,12 @@ pub enum BridgeDbPrefix {
     // key stored only an lnv1 gateway pubkey.
     LightningGatewayOverride = 0xc9,
 
+    // ERC-4337 user-op hash of a USDT withdrawal, keyed by the fedimint
+    // txid. The usdt module only surfaces the hash in the transient
+    // Signing/Submitted statuses; we persist it here so the terminal
+    // Confirmed status can still expose it for block-explorer links.
+    UsdtWithdrawalOpHash = 0xca,
+
     // Do not use anything after this key (inclusive)
     // see https://github.com/fedimint/fedimint/pull/4445
     #[allow(dead_code)]
@@ -343,4 +349,13 @@ impl_db_record!(
     key = TransactionDateFiatInfoKey,
     value = FiatFXInfo,
     db_prefix = BridgeDbPrefix::TransactionDateFiatInfo,
+);
+
+#[derive(Debug, Decodable, Encodable)]
+pub struct UsdtWithdrawalOpHashKey(pub fedimint_core::TransactionId);
+
+impl_db_record!(
+    key = UsdtWithdrawalOpHashKey,
+    value = [u8; 32],
+    db_prefix = BridgeDbPrefix::UsdtWithdrawalOpHash,
 );

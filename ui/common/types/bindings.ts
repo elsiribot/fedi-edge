@@ -1886,9 +1886,24 @@ export type RpcUsdtTransactionKind =
 export type RpcUsdtWithdrawalStatus =
   | { type: "unknown" }
   | { type: "queued" }
-  | { type: "signing" }
-  | { type: "submitted" }
-  | { type: "confirmed"; block: number }
+  | {
+      type: "signing";
+      /**
+       * ERC-4337 user-op hash (`0x…` hex), linkable on AA explorers.
+       */
+      opHash: string;
+    }
+  | { type: "submitted"; opHash: string }
+  | {
+      type: "confirmed";
+      block: number;
+      /**
+       * The module's terminal status carries no hash; the bridge fills
+       * this from the hash it persisted while Signing/Submitted, so it
+       * is absent for withdrawals confirmed before this app version.
+       */
+      opHash: string | null;
+    }
   | { type: "failed"; reason: string };
 
 export type RpcUserId = string;

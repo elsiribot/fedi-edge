@@ -33,12 +33,23 @@ pub struct RpcUsdtDepositStatus {
 pub enum RpcUsdtWithdrawalStatus {
     Unknown,
     Queued,
-    Signing,
-    Submitted,
+    #[serde(rename_all = "camelCase")]
+    Signing {
+        /// ERC-4337 user-op hash (`0x…` hex), linkable on AA explorers.
+        op_hash: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    Submitted {
+        op_hash: String,
+    },
     #[serde(rename_all = "camelCase")]
     Confirmed {
         #[ts(type = "number")]
         block: u64,
+        /// The module's terminal status carries no hash; the bridge fills
+        /// this from the hash it persisted while Signing/Submitted, so it
+        /// is absent for withdrawals confirmed before this app version.
+        op_hash: Option<String>,
     },
     #[serde(rename_all = "camelCase")]
     Failed {

@@ -8,7 +8,7 @@
 //! address. There is no BTC<->USDT exchange functionality here.
 
 use std::str::FromStr;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result, anyhow, bail};
 use fedimint_client::db::ChronologicalOperationLogKey;
@@ -40,10 +40,11 @@ use rpc_types::{
     RpcEcashUnit,
 };
 use runtime::utils::to_unix_time;
-use tracing::{debug, info, warn};
+use tracing::{Instrument as _, debug, info, warn};
 
 use super::FederationV2;
 use super::client::ClientExt as _;
+use super::db::UsdtWithdrawalOpHashKey;
 
 /// How long a deposit address handed out by `usdtGenerateDepositAddress`
 /// stays "hot" (polled at [`USDT_HOT_POLL_INTERVAL`] by the deposit service)
@@ -64,6 +65,11 @@ pub const USDT_FULL_SCAN_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
 /// How long we poll a submitted withdrawal for on-chain confirmation.
 const WITHDRAWAL_WATCH_DEADLINE: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// How long the federation's anchored EVM block may stay unchanged across
+/// full-scan passes before the deposit service warns that deposits cannot be
+/// proven (mainnet anchors normally advance every few minutes).
+const USDT_ANCHOR_STALL_WARN: Duration = Duration::from_secs(30 * 60);
 
 /// Federation meta key a federation operator can set to point clients at a
 /// specific EVM JSON-RPC endpoint for deposit-proof fetching (the
@@ -319,7 +325,55 @@ impl FederationV2 {
         let status = usdt
             .withdrawal_status(OutPoint { txid, out_idx: 0 })
             .await?;
-        Ok(convert_withdrawal_status(status.status))
+        Ok(self.finalize_withdrawal_status(txid, status.status).await)
+    }
+
+    /// Converts the module's withdrawal status to the RPC shape, persisting
+    /// the ERC-4337 user-op hash while the module surfaces it (only in the
+    /// transient `Signing`/`Submitted` statuses) so the terminal `Confirmed`
+    /// status -- which the module reports with just a block number -- can
+    /// still expose it for block-explorer links.
+    async fn finalize_withdrawal_status(
+        &self,
+        txid: TransactionId,
+        status: WithdrawalStatus,
+    ) -> RpcUsdtWithdrawalStatus {
+        match status {
+            WithdrawalStatus::Unknown => RpcUsdtWithdrawalStatus::Unknown,
+            WithdrawalStatus::Queued => RpcUsdtWithdrawalStatus::Queued,
+            WithdrawalStatus::Signing { op_hash } => {
+                self.store_withdrawal_op_hash(txid, op_hash).await;
+                RpcUsdtWithdrawalStatus::Signing {
+                    op_hash: op_hash_hex(op_hash),
+                }
+            }
+            WithdrawalStatus::Submitted { op_hash } => {
+                self.store_withdrawal_op_hash(txid, op_hash).await;
+                RpcUsdtWithdrawalStatus::Submitted {
+                    op_hash: op_hash_hex(op_hash),
+                }
+            }
+            WithdrawalStatus::Confirmed { block } => {
+                let op_hash = self
+                    .dbtx()
+                    .await
+                    .get_value(&UsdtWithdrawalOpHashKey(txid))
+                    .await
+                    .map(op_hash_hex);
+                RpcUsdtWithdrawalStatus::Confirmed { block, op_hash }
+            }
+            WithdrawalStatus::Failed { reason } => RpcUsdtWithdrawalStatus::Failed { reason },
+        }
+    }
+
+    async fn store_withdrawal_op_hash(&self, txid: TransactionId, op_hash: [u8; 32]) {
+        let mut dbtx = self.dbtx().await;
+        dbtx.insert_entry(&UsdtWithdrawalOpHashKey(txid), &op_hash)
+            .await;
+        if let Err(err) = dbtx.commit_tx_result().await {
+            // Best-effort: the next status poll rewrites the same value.
+            debug!(%txid, ?err, "failed to persist usdt withdrawal op hash");
+        }
     }
 
     /// Generates USDT-denominated e-cash notes (amount in 10^-6 USDT units),
@@ -563,7 +617,14 @@ impl FederationV2 {
             return;
         }
         self.spawn_cancellable("usdt_deposit_service", |fed| async move {
-            fed.run_usdt_deposit_service().await;
+            // All service logs carry the federation id: a device joined to
+            // several USDT federations is otherwise undiagnosable from field
+            // logs (2026-08-12 stranded-deposit incident).
+            let span = tracing::info_span!(
+                "usdt_deposit_service",
+                federation_id = %fed.rpc_federation_id().0
+            );
+            fed.run_usdt_deposit_service().instrument(span).await;
         });
     }
 
@@ -594,6 +655,8 @@ impl FederationV2 {
 
         let mut hint_rx = self.usdt_deposit_hint.subscribe();
         let mut next_full_scan = fedimint_core::time::now();
+        // (anchored block, first seen at) -- see the stall check below.
+        let mut anchor_watch: Option<(u64, SystemTime)> = None;
         loop {
             if fedimint_core::time::now() >= next_full_scan {
                 match self.usdt_check_deposits().await {
@@ -603,6 +666,7 @@ impl FederationV2 {
                     // retry next pass, never die, never emit Failed.
                     Err(err) => warn!(?err, "usdt deposit full scan failed, will retry"),
                 }
+                self.usdt_check_anchor_stall(&mut anchor_watch).await;
                 next_full_scan = fedimint_core::time::now() + USDT_FULL_SCAN_INTERVAL;
             }
 
@@ -641,6 +705,39 @@ impl FederationV2 {
                     }
                 }
             }
+        }
+    }
+
+    /// Warns when the federation's anchored EVM block has not advanced for
+    /// [`USDT_ANCHOR_STALL_WARN`] across full-scan passes. Deposits can only
+    /// be proven at the anchored block, so a frozen anchor silently strands
+    /// every incoming deposit no matter how healthy the client is
+    /// (2026-08-12 field incident) -- WARN so per-crate INFO filtering on
+    /// field log exports never drops the signal.
+    async fn usdt_check_anchor_stall(&self, anchor_watch: &mut Option<(u64, SystemTime)>) {
+        let Ok(usdt) = self.client.usdt() else {
+            return;
+        };
+        let anchored = match usdt.latest_anchored_block().await {
+            Ok(anchored) => anchored.latest,
+            // The full scan just warned about connectivity; stay quiet here.
+            Err(_) => return,
+        };
+        let now = fedimint_core::time::now();
+        match *anchor_watch {
+            Some((block, since)) if block == anchored => {
+                if let Ok(stalled) = now.duration_since(since)
+                    && stalled >= USDT_ANCHOR_STALL_WARN
+                {
+                    warn!(
+                        anchor = anchored,
+                        stalled_secs = stalled.as_secs(),
+                        "usdt federation anchored block is not advancing; \
+                         deposits cannot be credited until guardians anchor new blocks"
+                    );
+                }
+            }
+            _ => *anchor_watch = Some((anchored, now)),
         }
     }
 
@@ -755,7 +852,7 @@ impl FederationV2 {
         if anchored.latest == 0 {
             // The federation has not anchored any confirmation-deep block
             // yet; nothing to prove against. Retry next tick.
-            debug!(%address, "usdt deposit proof: no anchored block yet, retrying next tick");
+            info!(%address, "usdt deposit proof: no anchored block yet, retrying next tick");
             return Ok(false);
         }
 
@@ -771,7 +868,10 @@ impl FederationV2 {
             // `proven == 0`: after a server-side sweep the post-sweep proven
             // balance resets while `credited` stays, and only the client
             // module's sweep-aware rule can tell whether anything is new.)
-            debug!(
+            // INFO, not debug: this is the decisive per-poll outcome (e.g. a
+            // stale anchor proving 0 for a funded address) and must be
+            // reconstructable from INFO-filtered field logs.
+            info!(
                 %address,
                 anchored = anchored.latest,
                 "usdt deposit proof pre-check: account empty and never credited, nothing to submit"
@@ -788,7 +888,11 @@ impl FederationV2 {
             // credited total -- the normal steady state for an address whose
             // deposit was already credited. Benign, not an error.
             Err(err) if err.to_string().contains("nothing new to credit") => {
-                debug!(%address, "usdt deposit proof proves nothing new");
+                info!(
+                    %address,
+                    anchored = anchored.latest,
+                    "usdt deposit proof proves nothing new"
+                );
                 return Ok(false);
             }
             Err(err) => return Err(err),
@@ -798,6 +902,12 @@ impl FederationV2 {
         // newly credited delta.
         let after = usdt.deposit_status(claim_pk).await?;
         let credited = UsdtAmount(after.credited.0.saturating_sub(before.credited.0));
+        info!(
+            %address,
+            credited = credited.0,
+            anchored = anchored.latest,
+            "usdt deposit proof credited"
+        );
         self.emit_usdt_deposit_claimed(address, credited);
         self.usdt_clear_deposit_hint(address);
         Ok(true)
@@ -889,7 +999,8 @@ impl FederationV2 {
             loop {
                 match usdt.withdrawal_status(out_point).await {
                     Ok(status) => {
-                        let rpc_status = convert_withdrawal_status(status.status);
+                        let rpc_status =
+                            fed.finalize_withdrawal_status(txid, status.status).await;
                         let terminal = matches!(
                             rpc_status,
                             RpcUsdtWithdrawalStatus::Confirmed { .. }
@@ -924,15 +1035,8 @@ impl FederationV2 {
     }
 }
 
-fn convert_withdrawal_status(status: WithdrawalStatus) -> RpcUsdtWithdrawalStatus {
-    match status {
-        WithdrawalStatus::Unknown => RpcUsdtWithdrawalStatus::Unknown,
-        WithdrawalStatus::Queued => RpcUsdtWithdrawalStatus::Queued,
-        WithdrawalStatus::Signing { .. } => RpcUsdtWithdrawalStatus::Signing,
-        WithdrawalStatus::Submitted { .. } => RpcUsdtWithdrawalStatus::Submitted,
-        WithdrawalStatus::Confirmed { block } => RpcUsdtWithdrawalStatus::Confirmed { block },
-        WithdrawalStatus::Failed { reason } => RpcUsdtWithdrawalStatus::Failed { reason },
-    }
+fn op_hash_hex(op_hash: [u8; 32]) -> String {
+    format!("0x{}", hex::encode(op_hash))
 }
 
 fn variant_eq(a: &RpcUsdtWithdrawalStatus, b: &RpcUsdtWithdrawalStatus) -> bool {
