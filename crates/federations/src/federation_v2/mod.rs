@@ -2459,6 +2459,11 @@ impl FederationV2 {
                 };
 
                 match self.get_transaction_inner(op_key.operation_id, entry).await {
+                    // The generic transaction list is Bitcoin-denominated (the
+                    // UI renders its amounts as msats); USDT-unit operations
+                    // (mintv2 ecash sends/receives) belong exclusively to the
+                    // dedicated `usdt_list_transactions` history.
+                    Ok(Some(transaction)) if transaction.unit != RpcEcashUnit::Bitcoin => None,
                     Ok(Some(transaction)) => Some(Ok(RpcTransactionListEntry {
                         created_at,
                         transaction,
@@ -2957,6 +2962,13 @@ impl FederationV2 {
                 frontend_metadata = transaction.frontend_metadata;
                 transaction_kind = transaction.kind;
                 transaction_unit = transaction.unit;
+            }
+            USDT_OPERATION_TYPE => {
+                // usdt module operations (on-chain deposit claims and
+                // withdrawals) surface only in the dedicated USDT history
+                // (`usdt_list_transactions`), never in the generic
+                // (Bitcoin-denominated) transaction list.
+                return Ok(None);
             }
             _ => {
                 bail!(

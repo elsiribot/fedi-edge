@@ -1048,6 +1048,21 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
          {usdt_send_count} sends and {usdt_receive_count} receives: {usdt_txns:?}"
     );
 
+    // --- Assertion 6b: the generic (Bitcoin) transaction list must NOT leak
+    // USDT operations. A USDT-unit mintv2 row would have its micros rendered
+    // as msats by the UI, and usdt module ops (deposit claims/withdrawals)
+    // previously surfaced as noisy error rows ("Found unimplemented for
+    // module with operation type = usdt"). ---
+    let generic_txns = federation.list_transactions(100, None).await;
+    ensure!(
+        generic_txns.iter().all(|entry| match entry {
+            Ok(entry) => entry.transaction.unit == rpc_types::RpcEcashUnit::Bitcoin,
+            Err(err) => !err.contains("usdt"),
+        }),
+        "generic transaction list must contain only Bitcoin-unit rows and no \
+         usdt error rows, got {generic_txns:?}"
+    );
+
     // --- Assertion 7: cancel a generated USDT ecash -> USDT restored, BTC
     // untouched (cancel routes by note format then unit) ---
     let usdt_before_cancel = federation.usdt_balance().await?.0;
