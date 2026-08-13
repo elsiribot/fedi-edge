@@ -2080,6 +2080,7 @@ export type UsdtDepositEvent = {
 };
 
 export type UsdtDepositState =
+  | { type: "pending"; amount: RpcUsdtAmount }
   | { type: "claimed"; amount: RpcUsdtAmount }
   | { type: "failed"; reason: string };
 

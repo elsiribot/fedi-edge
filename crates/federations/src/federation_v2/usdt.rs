@@ -25,7 +25,9 @@ use fedimint_mintv2_client::{
 use fedimint_usdt_client::UsdtOperationMeta;
 use fedimint_usdt_client::db::{ClaimKeyKey, ClaimKeyPrefixAll};
 use fedimint_usdt_client::evm::{DEFAULT_EVM_RPC_URLS, EthJsonRpc};
-use fedimint_usdt_common::{BootstrapState, EvmAddress, USDT_UNIT, UsdtAmount, WithdrawalStatus};
+use fedimint_usdt_common::{
+    BootstrapState, EvmAddress, USDT_UNIT, UsdtAmount, WithdrawalStatus, balances_storage_key,
+};
 use futures::StreamExt;
 use rpc_types::error::ErrorCode;
 use rpc_types::event::{
@@ -756,10 +758,104 @@ impl FederationV2 {
             .await
             .ok_or_else(|| anyhow!("unknown deposit address {address}"))?;
         let claim_pk = keypair.public_key();
-        self.usdt_try_submit_deposit_proof(address, &keypair)
+        let proof_credited = self
+            .usdt_try_submit_deposit_proof(address, &keypair)
             .await?;
-        self.usdt_claim_if_claimable(address, claim_pk).await?;
+        let legacy_claimed = self.usdt_claim_if_claimable(address, claim_pk).await?;
+        if !proof_credited && !legacy_claimed {
+            self.usdt_emit_pending_deposit_hint(address, claim_pk).await;
+        }
         Ok(())
+    }
+
+    /// Best-effort "incoming deposit detected" hint (receive-screen UX):
+    /// when a hot-address poll credited nothing, compare the address's
+    /// balance at the `latest` block with the credited total and emit a
+    /// `Pending` event for any surplus -- a deposit the federation cannot
+    /// credit yet (typically because its anchored block still predates the
+    /// deposit). Errors only reduce the hint's availability, never the
+    /// poll: logged at debug and swallowed.
+    async fn usdt_emit_pending_deposit_hint(&self, address: EvmAddress, claim_pk: PublicKey) {
+        let result: Result<()> = async {
+            let usdt = self.client.usdt()?;
+            let status = usdt.deposit_status(claim_pk).await?;
+            let onchain = self.usdt_onchain_balance_latest(address).await?;
+            // After a server-side sweep the on-chain balance drops below
+            // `credited`; saturating to 0 keeps that quiet.
+            let pending = onchain.0.saturating_sub(status.credited.0);
+            if pending > 0 {
+                info!(%address, pending, "usdt deposit detected on-chain, not credited yet");
+                self.runtime
+                    .event_sink
+                    .typed_event(&Event::UsdtDeposit(UsdtDepositEvent {
+                        federation_id: self.rpc_federation_id(),
+                        address: address.to_string(),
+                        state: UsdtDepositState::Pending {
+                            amount: RpcUsdtAmount(pending),
+                        },
+                    }));
+            }
+            Ok(())
+        }
+        .await;
+        if let Err(err) = result {
+            debug!(%address, ?err, "usdt pending-deposit hint check failed");
+        }
+    }
+
+    /// Reads `address`'s on-chain USDT balance at the `latest` block via
+    /// `eth_getStorageAt` on the ERC-20 balances slot -- deliberately NOT
+    /// the federation's anchored block, which is what crediting is proven
+    /// against. Used only for the pending-deposit hint. Falls back across
+    /// the same endpoint list as the deposit-proof fetches, with a
+    /// WASM-safe per-endpoint timeout.
+    async fn usdt_onchain_balance_latest(&self, address: EvmAddress) -> Result<UsdtAmount> {
+        const RPC_TIMEOUT: Duration = Duration::from_secs(20);
+        let usdt = self.client.usdt()?;
+        let contract = usdt.config().usdt_contract;
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "eth_getStorageAt",
+            "params": [
+                format!("0x{}", hex::encode(contract.0)),
+                format!("0x{}", hex::encode(balances_storage_key(&address))),
+                "latest",
+            ],
+        });
+        let client = reqwest::Client::new();
+        let mut last_err = None;
+        for url in self.usdt_evm_rpc_urls().await {
+            let call = async {
+                let response = client.post(&url).json(&body).send().await?;
+                if !response.status().is_success() {
+                    bail!("JSON-RPC HTTP status {}", response.status());
+                }
+                let value: serde_json::Value = response.json().await?;
+                if let Some(error) = value.get("error").filter(|e| !e.is_null()) {
+                    bail!("JSON-RPC error: {error}");
+                }
+                let result = value["result"]
+                    .as_str()
+                    .context("missing eth_getStorageAt result")?;
+                let hex_value = result.trim_start_matches("0x");
+                let raw = if hex_value.is_empty() {
+                    0
+                } else {
+                    u128::from_str_radix(hex_value, 16)
+                        .context("parsing eth_getStorageAt result")?
+                };
+                Ok(UsdtAmount(
+                    u64::try_from(raw).context("on-chain balance overflows u64")?,
+                ))
+            };
+            match fedimint_core::runtime::timeout(RPC_TIMEOUT, call).await {
+                Ok(Ok(amount)) => return Ok(amount),
+                Ok(Err(err)) => last_err = Some(err),
+                Err(_) => last_err = Some(anyhow!("eth_getStorageAt to {url} timed out")),
+            }
+        }
+        Err(last_err.unwrap_or_else(|| anyhow!("no EVM RPC URL configured")))
     }
 
     /// Reads the operator-configured EVM RPC URL from federation meta

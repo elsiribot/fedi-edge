@@ -279,6 +279,13 @@ pub struct UsdtDepositEvent {
 #[serde(tag = "type", rename_all = "camelCase")]
 #[ts(export)]
 pub enum UsdtDepositState {
+    /// An on-chain deposit is sitting on the address (balance at the
+    /// `latest` block exceeds what the federation has credited) but has not
+    /// been credited yet -- e.g. the federation's anchored block still
+    /// predates the deposit. Re-emitted on every hot poll while pending, so
+    /// late subscribers still see it.
+    #[serde(rename_all = "camelCase")]
+    Pending { amount: crate::usdt::RpcUsdtAmount },
     #[serde(rename_all = "camelCase")]
     Claimed { amount: crate::usdt::RpcUsdtAmount },
     #[serde(rename_all = "camelCase")]
