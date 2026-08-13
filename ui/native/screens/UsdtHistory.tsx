@@ -1,3 +1,4 @@
+import { useIsFocused } from '@react-navigation/native'
 import type { NativeStackScreenProps } from '@react-navigation/native-stack'
 import { Text, Theme, useTheme } from '@rneui/themed'
 import React, { useCallback, useEffect, useRef, useState } from 'react'
@@ -106,6 +107,58 @@ const UsdtHistory: React.FC<Props> = ({ route }: Props) => {
             .catch(e => toast.error(t, e))
             .finally(() => setIsLoading(false))
     }, [fetchTransactions, t, toast])
+
+    // Live updates: refetch on USDT deposit/withdrawal events and on generic
+    // transaction events for USDT-denominated operations (ecash
+    // sends/receives emit those), plus a modest poll fallback while the
+    // screen is focused for anything the events miss (e.g. a chat ecash
+    // send made elsewhere in the app).
+    const isFocused = useIsFocused()
+    useEffect(() => {
+        if (!isFocused) return
+
+        const refetch = () =>
+            fetchTransactions().catch(e =>
+                log.warn('Failed to refresh USDT transactions', e),
+            )
+
+        const unsubscribeDeposits = fedimint.addListener(
+            'usdtDeposit',
+            event => {
+                if (event.federationId !== federationId) return
+                // `pending` deposits (detected on-chain, not credited yet)
+                // have no history row and the event repeats every poll
+                if (event.state.type === 'pending') return
+                refetch()
+            },
+        )
+        const unsubscribeWithdrawals = fedimint.addListener(
+            'usdtWithdrawal',
+            event => {
+                if (event.federationId !== federationId) return
+                // The event already carries the fresh status - feed the row
+                // badge cache directly instead of waiting on a per-txid fetch
+                setStatusByTxid(prev => ({ ...prev, [event.txid]: event.state }))
+                refetch()
+            },
+        )
+        const unsubscribeTransactions = fedimint.addListener(
+            'transaction',
+            event => {
+                if (event.federationId !== federationId) return
+                if (event.transaction.unit !== 'usdt') return
+                refetch()
+            },
+        )
+        const pollInterval = setInterval(refetch, 15000)
+
+        return () => {
+            unsubscribeDeposits()
+            unsubscribeWithdrawals()
+            unsubscribeTransactions()
+            clearInterval(pollInterval)
+        }
+    }, [isFocused, fedimint, federationId, fetchTransactions])
 
     const handleRefresh = useCallback(async () => {
         setIsRefreshing(true)

@@ -41,6 +41,9 @@ const UsdtReceive: React.FC<Props> = () => {
 
     const [address, setAddress] = useState<string | null>(null)
     const [receivedMicros, setReceivedMicros] = useState(0)
+    // On-chain deposit detected but not credited by the federation yet
+    // (bridge `pending` deposit events, re-emitted while it stays pending)
+    const [pendingMicros, setPendingMicros] = useState(0)
     // Optional requested amount, encoded as a Fedi-convention
     // `ethereum:<address>?amount=<decimal USDT>` URI in the QR
     const [requestedMicros, setRequestedMicros] = useState<number | null>(null)
@@ -88,7 +91,10 @@ const UsdtReceive: React.FC<Props> = () => {
             if (event.federationId !== federationId) return
             if (event.address !== address) return
             const state = event.state
-            if (state.type === 'claimed') {
+            if (state.type === 'pending') {
+                setPendingMicros(state.amount)
+            } else if (state.type === 'claimed') {
+                setPendingMicros(0)
                 setReceivedMicros(received => Math.max(received, state.amount))
                 dispatch(refreshUsdtBalance({ fedimint, federationId }))
             }
@@ -188,6 +194,15 @@ const UsdtReceive: React.FC<Props> = () => {
                                     />
                                     <Text caption medium>
                                         {`${t('feature.usdt.deposit-received')}: ${formatUsdt(receivedMicros)}`}
+                                    </Text>
+                                </>
+                            ) : pendingMicros > 0 ? (
+                                <>
+                                    <ActivityIndicator size="small" />
+                                    <Text caption medium>
+                                        {t('feature.usdt.deposit-pending', {
+                                            amount: formatUsdt(pendingMicros),
+                                        })}
                                     </Text>
                                 </>
                             ) : (

@@ -189,6 +189,8 @@ export const useUsdtBalance = (federationId: Federation['id']) => {
  * Monitors the USDT account of a federation to refresh the balance:
  * - on mount, then every 60 seconds
  * - whenever a USDT deposit or withdrawal event is received
+ * - whenever a transaction event for a USDT-denominated operation arrives
+ *   (mintv2 ecash receives emit those, e.g. incoming chat ecash payments)
  */
 export function useMonitorUsdtAccount(federationId: Federation['id']) {
     const dispatch = useCommonDispatch()
@@ -210,6 +212,9 @@ export function useMonitorUsdtAccount(federationId: Federation['id']) {
             'usdtDeposit',
             event => {
                 if (event.federationId !== federationId) return
+                // `pending` = detected on-chain but not credited yet, so the
+                // balance hasn't changed (and the event repeats every poll)
+                if (event.state.type === 'pending') return
                 log.info('UsdtDepositEvent', event.state)
                 refreshBalance()
             },
@@ -222,10 +227,20 @@ export function useMonitorUsdtAccount(federationId: Federation['id']) {
                 refreshBalance()
             },
         )
+        const unsubscribeTransactions = fedimint.addListener(
+            'transaction',
+            event => {
+                if (event.federationId !== federationId) return
+                if (event.transaction.unit !== 'usdt') return
+                log.info('USDT transaction event', event.transaction.kind)
+                refreshBalance()
+            },
+        )
 
         return () => {
             unsubscribeDeposits()
             unsubscribeWithdrawals()
+            unsubscribeTransactions()
             clearInterval(usdtBalanceMonitor)
         }
     }, [dispatch, fedimint, federationId, isUsdtSupported])
