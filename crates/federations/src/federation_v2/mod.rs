@@ -2447,13 +2447,31 @@ impl FederationV2 {
         limit: usize,
         start_after: Option<ChronologicalOperationLogKey>,
     ) -> Vec<Result<RpcTransactionListEntry, String>> {
-        let futures = self
-            .client
-            .operation_log()
-            .paginate_operations_rev(limit, start_after)
-            .await
-            .into_iter()
-            .map(|(op_key, entry)| async move {
+        if limit == 0 {
+            return Vec::new();
+        }
+
+        // Operations filtered out below (USDT-unit ones in particular) don't
+        // count toward `limit`, and the caller's pagination cursor is the
+        // timestamp of the last row we RETURN. A single filtered
+        // `paginate_operations_rev` page could therefore come back empty and
+        // stall pagination forever; keep paging in chunks until enough
+        // Bitcoin-denominated entries have accumulated (mirrors
+        // `usdt_list_transactions`).
+        const PAGE_SIZE: usize = 100;
+
+        let mut cursor = start_after;
+        let mut entries = Vec::new();
+        loop {
+            let page = self
+                .client
+                .operation_log()
+                .paginate_operations_rev(PAGE_SIZE, cursor)
+                .await;
+            let page_len = page.len();
+            let next_cursor = page.last().map(|(key, _)| *key);
+
+            let futures = page.into_iter().map(|(op_key, entry)| async move {
                 let Ok(created_at) = to_unix_time(op_key.creation_time) else {
                     return None;
                 };
@@ -2472,11 +2490,19 @@ impl FederationV2 {
                     Err(e) => Some(Err(e.to_string())),
                 }
             });
-        futures::future::join_all(futures)
-            .await
-            .into_iter()
-            .flatten()
-            .collect()
+            entries.extend(
+                futures::future::join_all(futures)
+                    .await
+                    .into_iter()
+                    .flatten(),
+            );
+
+            if entries.len() >= limit || page_len < PAGE_SIZE {
+                break;
+            }
+            cursor = next_cursor;
+        }
+        entries
     }
 
     pub async fn get_transaction(
