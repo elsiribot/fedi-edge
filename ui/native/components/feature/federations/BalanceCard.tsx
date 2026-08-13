@@ -6,7 +6,10 @@ import { Pressable, StyleSheet } from 'react-native'
 import { HIDDEN_AMOUNT_MASK } from '@fedi/common/constants/currency'
 import { useBalance } from '@fedi/common/hooks/amount'
 import { useRecoveryProgress } from '@fedi/common/hooks/recovery'
-import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
+import {
+    useFormatUsdtMicros,
+    usePendingUsdtDeposits,
+} from '@fedi/common/hooks/usdt'
 import {
     selectBalanceDisplay,
     selectCurrency,
@@ -49,6 +52,7 @@ export default function WalletBalanceCard({
     const usdtBalanceMicros = useAppSelector(s =>
         selectUsdtBalanceMicros(s, federationId),
     )
+    const pendingUsdtDepositMicros = usePendingUsdtDeposits(federationId)
     const balanceDisplay = useAppSelector(selectBalanceDisplay)
 
     const onPressTransactions = () => {
@@ -84,7 +88,12 @@ export default function WalletBalanceCard({
         iconColor = undefined
         headerTitle = t('feature.usdt.usdt-balance-network')
         primaryAmount = formatUsdt(usdtBalanceMicros)
-        secondaryAmount = null
+        // Incoming on-chain deposit detected but not credited yet -
+        // mirrors the stability pool's pending line above
+        secondaryAmount =
+            pendingUsdtDepositMicros > 0
+                ? `+${formatUsdt(pendingUsdtDepositMicros)} ${t('words.pending')}`
+                : null
     }
 
     const style = styles(theme)

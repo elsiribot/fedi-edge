@@ -14,7 +14,10 @@ import {
 
 import { useFedimint } from '@fedi/common/hooks/fedimint'
 import { useToast } from '@fedi/common/hooks/toast'
-import { useFormatUsdtMicros } from '@fedi/common/hooks/usdt'
+import {
+    useFormatUsdtMicros,
+    usePendingUsdtDeposits,
+} from '@fedi/common/hooks/usdt'
 import { TransactionStatusBadge } from '@fedi/common/types'
 import type { RpcUsdtWithdrawalStatus } from '@fedi/common/types/bindings'
 import dateUtils from '@fedi/common/utils/DateUtils'
@@ -81,6 +84,7 @@ const UsdtHistory: React.FC<Props> = ({ route }: Props) => {
     const toast = useToast()
     const fedimint = useFedimint()
     const formatUsdt = useFormatUsdtMicros()
+    const pendingDepositMicros = usePendingUsdtDeposits(federationId)
 
     const [transactions, setTransactions] = useState<RpcUsdtTransaction[]>([])
     const [isLoading, setIsLoading] = useState(true)
@@ -312,6 +316,41 @@ const UsdtHistory: React.FC<Props> = ({ route }: Props) => {
                             refreshing={isRefreshing}
                             onRefresh={handleRefresh}
                         />
+                    }
+                    ListHeaderComponent={
+                        pendingDepositMicros > 0 ? (
+                            <Row align="center" gap="md" style={style.row}>
+                                <HistoryIcon badge="incoming">
+                                    {/* Official Tether mark carries its own colors, no tint */}
+                                    <SvgImage
+                                        name="UsdtCircle"
+                                        size={theme.sizes.historyIcon}
+                                    />
+                                </HistoryIcon>
+                                <Column grow gap="xs" fullWidth basis={false}>
+                                    <Text caption medium>
+                                        {t('feature.usdt.deposit')}
+                                    </Text>
+                                    <Text small style={style.subText}>
+                                        {t('feature.usdt.claiming')}
+                                    </Text>
+                                </Column>
+                                <Row
+                                    shrink={false}
+                                    align="center"
+                                    gap="xs"
+                                    justify="end">
+                                    <ActivityIndicator size="small" />
+                                    <Text
+                                        medium
+                                        caption
+                                        style={style.rightAlignedText}
+                                        color={theme.colors.green}>
+                                        {`+${formatUsdt(pendingDepositMicros)}`}
+                                    </Text>
+                                </Row>
+                            </Row>
+                        ) : null
                     }
                     ListEmptyComponent={
                         <Column center grow style={style.empty}>

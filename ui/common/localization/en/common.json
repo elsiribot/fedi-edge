@@ -1549,6 +1549,7 @@
             "send-usdt": "Send USDT",
             "awaiting-deposit": "Awaiting deposit…",
             "deposit-pending": "Deposit detected: {{amount}} — waiting for confirmation…",
+            "claiming": "Claiming — not in your wallet yet…",
             "deposit-received": "Deposit received",
             "deposit-received-notification": "USDT deposit received: {{amount}}",
             "recipient-address": "Recipient address · Ethereum (ERC-20)",

@@ -8,6 +8,7 @@ import { renderHookWithState } from '../../utils/render'
 import {
     useFormatUsdtMicros,
     useMonitorUsdtAccount,
+    usePendingUsdtDeposits,
     useUsdtAmountInput,
 } from '../../../hooks/usdt'
 
@@ -147,6 +148,61 @@ describe('common/hooks/usdt', () => {
                 })
             })
             expect(fedimint.usdtBalance).toHaveBeenCalledTimes(2)
+        })
+
+        it('tracks pending deposits per address and clears them on claim', () => {
+            const fedimint = createMockFedimintBridge()
+            const { result } = renderHookWithState(
+                () => usePendingUsdtDeposits(mockFederation1.id),
+                store,
+                fedimint,
+            )
+            const onDeposit = (fedimint.addListener as jest.Mock).mock.calls.find(
+                ([e]) => e === 'usdtDeposit',
+            )?.[1]
+            expect(onDeposit).toBeDefined()
+            expect(result.current).toBe(0)
+
+            // Two addresses pending sum up; re-emits for the same address
+            // (the bridge repeats `pending` every poll) don't double-count
+            act(() => {
+                onDeposit({
+                    federationId: mockFederation1.id,
+                    address: '0xaaa',
+                    state: { type: 'pending', amount: 1_000_000 },
+                })
+                onDeposit({
+                    federationId: mockFederation1.id,
+                    address: '0xaaa',
+                    state: { type: 'pending', amount: 1_000_000 },
+                })
+                onDeposit({
+                    federationId: mockFederation1.id,
+                    address: '0xbbb',
+                    state: { type: 'pending', amount: 2_500_000 },
+                })
+            })
+            expect(result.current).toBe(3_500_000)
+
+            // Other federations' events are ignored
+            act(() => {
+                onDeposit({
+                    federationId: 'some-other-federation',
+                    address: '0xccc',
+                    state: { type: 'pending', amount: 9_000_000 },
+                })
+            })
+            expect(result.current).toBe(3_500_000)
+
+            // A claim clears only its own address
+            act(() => {
+                onDeposit({
+                    federationId: mockFederation1.id,
+                    address: '0xaaa',
+                    state: { type: 'claimed', amount: 1_000_000 },
+                })
+            })
+            expect(result.current).toBe(2_500_000)
         })
 
         it('ignores pending deposit events but refreshes on claimed', async () => {

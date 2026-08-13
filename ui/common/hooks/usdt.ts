@@ -1,5 +1,5 @@
 import { TFunction } from 'i18next'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 import {
     refreshUsdtBalance,
@@ -183,6 +183,80 @@ export const useUsdtBalance = (federationId: Federation['id']) => {
         formattedBalance: formatUsdt(balanceMicros),
         refreshBalance,
     }
+}
+
+/**
+ * How long a pending deposit stays displayed after its last `pending`
+ * event. The bridge re-emits `pending` on every hot-address poll (~15s)
+ * while the deposit remains uncredited, so a healthy pending deposit
+ * refreshes itself well within this window; if the events stop without a
+ * `claimed` (e.g. the bridge lost EVM RPC connectivity), the hint expires
+ * rather than showing "incoming" forever.
+ */
+const PENDING_DEPOSIT_EXPIRY_MS = 60_000
+
+/**
+ * Total micros of on-chain deposits the bridge has detected for this
+ * federation but the federation has not credited yet (bridge `pending`
+ * deposit events) - money that is visibly on its way but NOT in the
+ * wallet balance. Cleared per address as soon as its deposit is claimed.
+ */
+export function usePendingUsdtDeposits(federationId: Federation['id']): number {
+    const fedimint = useFedimint()
+    const [pendingByAddress, setPendingByAddress] = useState<
+        Record<string, { amountMicros: number; seenAt: number }>
+    >({})
+
+    useEffect(() => {
+        if (!federationId) return
+
+        const unsubscribe = fedimint.addListener('usdtDeposit', event => {
+            if (event.federationId !== federationId) return
+            const state = event.state
+            if (state.type === 'pending') {
+                setPendingByAddress(prev => ({
+                    ...prev,
+                    [event.address]: {
+                        amountMicros: state.amount,
+                        seenAt: Date.now(),
+                    },
+                }))
+            } else if (state.type === 'claimed') {
+                setPendingByAddress(prev => {
+                    if (!(event.address in prev)) return prev
+                    const next = { ...prev }
+                    delete next[event.address]
+                    return next
+                })
+            }
+        })
+        const expiryInterval = setInterval(() => {
+            setPendingByAddress(prev => {
+                const now = Date.now()
+                const fresh = Object.entries(prev).filter(
+                    ([, entry]) =>
+                        now - entry.seenAt < PENDING_DEPOSIT_EXPIRY_MS,
+                )
+                return fresh.length === Object.keys(prev).length
+                    ? prev
+                    : Object.fromEntries(fresh)
+            })
+        }, 10_000)
+
+        return () => {
+            unsubscribe()
+            clearInterval(expiryInterval)
+        }
+    }, [fedimint, federationId])
+
+    return useMemo(
+        () =>
+            Object.values(pendingByAddress).reduce(
+                (sum, entry) => sum + entry.amountMicros,
+                0,
+            ),
+        [pendingByAddress],
+    )
 }
 
 /**
