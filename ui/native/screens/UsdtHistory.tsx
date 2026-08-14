@@ -68,6 +68,9 @@ const getStatusBadge = (
         )
             return 'pending'
     }
+    // Incoming rows whose e-cash is still being minted (deposit claimed /
+    // ecash received but notes not issued into the wallet yet)
+    if (txn.pending) return 'pending'
     return txn.incoming ? 'incoming' : 'outgoing'
 }
 
@@ -256,16 +259,25 @@ const UsdtHistory: React.FC<Props> = ({ route }: Props) => {
                             <Text caption medium>
                                 {getUsdtTxnKindText(t, txn)}
                             </Text>
-                            {address && (
+                            {txn.pending ? (
                                 <Text
                                     small
                                     numberOfLines={1}
                                     style={style.subText}>
-                                    {stringUtils.truncateMiddleOfString(
-                                        address,
-                                        6,
-                                    )}
+                                    {t('feature.usdt.claiming')}
                                 </Text>
+                            ) : (
+                                address && (
+                                    <Text
+                                        small
+                                        numberOfLines={1}
+                                        style={style.subText}>
+                                        {stringUtils.truncateMiddleOfString(
+                                            address,
+                                            6,
+                                        )}
+                                    </Text>
+                                )
                             )}
                         </Column>
                         <Column shrink={false} justify="end" gap="xs">

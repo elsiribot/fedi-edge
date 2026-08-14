@@ -111,6 +111,15 @@ const UsdtHistoryDetailOverlay: React.FC<Props> = ({
     if (!txn) return <></>
 
     const items: HistoryDetailItemProps[] = []
+    // Incoming e-cash still being minted: the amount is not in the wallet
+    // yet, so the overlay must not read as settled (withdrawals have their
+    // own live status below)
+    if (txn.kind.type !== 'withdrawal' && txn.pending) {
+        items.push({
+            label: t('words.status'),
+            value: t('feature.usdt.claiming'),
+        })
+    }
     if (txn.kind.type === 'withdrawal' && txn.kind.txid && status) {
         items.push({
             label: t('words.status'),

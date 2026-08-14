@@ -526,6 +526,7 @@ impl FederationV2 {
                             // the e-cash actually issued is amount - fee
                             amount: RpcUsdtAmount(amount.0.saturating_sub(fee.0)),
                             incoming: true,
+                            pending: false,
                             kind: RpcUsdtTransactionKind::Deposit {
                                 address: account.to_string(),
                             },
@@ -539,6 +540,7 @@ impl FederationV2 {
                             created_at,
                             amount: RpcUsdtAmount(amount.0),
                             incoming: false,
+                            pending: false,
                             kind: RpcUsdtTransactionKind::Withdrawal {
                                 recipient: recipient.to_string(),
                                 txid: txid.map(|txid| txid.to_string()),
@@ -571,6 +573,7 @@ impl FederationV2 {
                                         created_at,
                                         amount,
                                         incoming: false,
+                                        pending: false,
                                         kind: RpcUsdtTransactionKind::EcashSend,
                                     })
                             }
@@ -584,6 +587,7 @@ impl FederationV2 {
                                     created_at,
                                     amount,
                                     incoming: true,
+                                    pending: false,
                                     kind: RpcUsdtTransactionKind::EcashReceive,
                                 }),
                             // reissues are internal bookkeeping, not user payments
@@ -592,7 +596,18 @@ impl FederationV2 {
                     }
                     _ => None,
                 };
-                if let Some(tx) = tx {
+                if let Some(mut tx) = tx {
+                    // Incoming rows (deposit claims and e-cash receives) mint
+                    // their e-cash asynchronously: the operation-log entry
+                    // exists as soon as the transaction is submitted, but the
+                    // notes only land in the wallet once the operation's state
+                    // machines finish (consensus acceptance + signature
+                    // shares). Until then the row must show as pending, not
+                    // settled. Outgoing rows leave the wallet at submit time
+                    // and withdrawals track their own server-side status.
+                    if tx.incoming {
+                        tx.pending = self.client.has_active_states(op_key.operation_id).await;
+                    }
                     transactions.push(tx);
                     if transactions.len() >= limit {
                         return Ok(transactions);
@@ -1095,8 +1110,7 @@ impl FederationV2 {
             loop {
                 match usdt.withdrawal_status(out_point).await {
                     Ok(status) => {
-                        let rpc_status =
-                            fed.finalize_withdrawal_status(txid, status.status).await;
+                        let rpc_status = fed.finalize_withdrawal_status(txid, status.status).await;
                         let terminal = matches!(
                             rpc_status,
                             RpcUsdtWithdrawalStatus::Confirmed { .. }

@@ -251,6 +251,23 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
         "usdtListDeposits must include the funded address"
     );
 
+    // The balance already reflects the minted e-cash at this point, so the
+    // deposit's history row must NOT report `pending` anymore (it is pending
+    // only while the claim operation's issuance state machines still run —
+    // the window where history showed a settled-looking row before the
+    // e-cash was actually in the wallet).
+    let history = federation.usdt_list_transactions(10, None).await?;
+    let deposit_row = history
+        .iter()
+        .find(|tx| {
+            matches!(&tx.kind, RpcUsdtTransactionKind::Deposit { address: a } if *a == address)
+        })
+        .context("history must contain the claimed deposit row")?;
+    ensure!(
+        !deposit_row.pending,
+        "a deposit whose e-cash is already in the balance must not report pending"
+    );
+
     // Address rotation policy: now that the address has received (and
     // claimed) a deposit, the next generate call must rotate to a fresh one.
     let rotated_address = federation.usdt_generate_deposit_address().await?;
@@ -439,7 +456,9 @@ async fn test_usdt_bridge_end_to_end() -> anyhow::Result<()> {
     })
     .await
     .with_context(|| {
-        format!("recovered USDT balance never reached the settled pre-backup balance {settled_balance}")
+        format!(
+            "recovered USDT balance never reached the settled pre-backup balance {settled_balance}"
+        )
     })?;
     td2.shutdown().await?;
 
@@ -867,7 +886,10 @@ async fn test_mixed_btc_usdt_federation() -> anyhow::Result<()> {
     // already-spent error would be equally acceptable. What must NEVER
     // happen is a second credit.
     let usdt_before_double = federation.usdt_balance().await?.0;
-    match federation.usdt_receive_ecash(usdt_note_2.ecash.clone()).await {
+    match federation
+        .usdt_receive_ecash(usdt_note_2.ecash.clone())
+        .await
+    {
         Ok(amount) => ensure!(
             amount.0 == usdt_send.0,
             "idempotent re-claim must report the original amount, got {}",

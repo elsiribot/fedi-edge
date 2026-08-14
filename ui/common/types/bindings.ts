@@ -1870,6 +1870,14 @@ export type RpcUsdtTransaction = {
   createdAt: number;
   amount: RpcUsdtAmount;
   incoming: boolean;
+  /**
+   * True while the operation's e-cash has not been issued into the
+   * wallet yet (its state machines are still running): a claimed
+   * deposit or received e-cash whose notes are still being minted. The
+   * row must not render as settled -- the amount is not spendable and
+   * not part of the balance until this flips false.
+   */
+  pending: boolean;
   kind: RpcUsdtTransactionKind;
 };
 
